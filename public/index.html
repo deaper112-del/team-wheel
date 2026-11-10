@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1A100C">
+  <meta name="robots" content="noindex">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="团建转盘">
+  <title>团建幸运大转盘</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23C53424'/%3E%3Cpath d='M32 6l5 18-5-3-5 3z' fill='%23F3D48A'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <span class="seal" aria-hidden="true">团</span>
+        <div>
+          <p class="eyebrow">TEAM NIGHT</p>
+          <h1>幸运大转盘</h1>
+        </div>
+      </div>
+      <button id="sound" class="icon-btn" type="button" aria-pressed="true">音效开</button>
+    </header>
+    <p id="lede" class="lede">正在打开转盘…</p>
+
+    <section id="share" class="share" hidden>
+      <p class="share-kicker" id="share-kicker">发给同事</p>
+      <p class="share-note" id="share-note"></p>
+      <p id="share-url" class="share-url"></p>
+      <button id="copy" class="btn btn-primary" type="button">复制邀请语到群里</button>
+      <p class="room-code">房间码 <strong id="room-code"></strong></p>
+    </section>
+
+    <section class="stage" id="stage">
+      <div class="wheel-box" id="wheel-box">
+        <canvas id="wheel" width="800" height="800" aria-label="团建活动转盘"></canvas>
+        <div class="pointer" aria-hidden="true">
+          <svg viewBox="0 0 44 58">
+            <path d="M22 56 L5 18 Q22 2 39 18 Z" fill="#E24B3B" stroke="#F6D78A" stroke-width="3" stroke-linejoin="round"/>
+            <circle cx="22" cy="18" r="4.5" fill="#F6D78A"/>
+          </svg>
+        </div>
+        <button id="hub" class="hub" type="button">开局</button>
+      </div>
+    </section>
+
+    <section class="sheet" id="sheet">
+      <div id="home-panel">
+        <ol class="steps">
+          <li>点转盘中间的「开局」</li>
+          <li>把邀请语发到群里</li>
+          <li>每人转一次，票数最高的活动胜出</li>
+        </ol>
+        <h2 class="stats-title">转盘里有这些</h2>
+        <ul id="menu" class="menu"></ul>
+        <form id="join-form" class="join">
+          <label for="code">已有房间码</label>
+          <div class="join-row">
+            <input id="code" maxlength="4" inputmode="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="例如 K7MP">
+            <button class="btn btn-dark" type="submit">加入</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="room-panel" hidden>
+        <div class="name-row">
+          <label for="name">你的名字</label>
+          <input id="name" maxlength="12" autocomplete="nickname" spellcheck="false" placeholder="例如 小周">
+          <p class="hint" id="fair">每个名字只能转一次。转到哪由电脑决定，转盘只是把结果演出来。</p>
+        </div>
+        <div id="result" class="result" hidden aria-live="polite"></div>
+        <div id="winner" class="winner" hidden aria-live="polite"></div>
+        <div id="stats"></div>
+        <div id="host-tools" class="host-tools" hidden>
+          <button id="close-btn" class="btn btn-dark" type="button">结束投票并公布</button>
+          <button id="reopen-btn" class="btn btn-ghost" type="button" hidden>继续投票</button>
+          <button id="reset-btn" class="btn btn-text" type="button">清空重来</button>
+        </div>
+        <p class="footnote" id="footnote"></p>
+      </div>
+    </section>
+  </div>
+  <div id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

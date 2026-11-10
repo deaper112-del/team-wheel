@@ -1,0 +1,14 @@
+[
+  {"id": "meal", "name": "吃饭", "emoji": "🍜", "color": "#E25B45", "blurb": "找家大家都想去的馆子，吃饱再聊"},
+  {"id": "drink", "name": "喝酒", "emoji": "🍻", "color": "#B86A10", "blurb": "清吧或居酒屋，微醺就好"},
+  {"id": "sing", "name": "唱歌", "emoji": "🎤", "color": "#7A4ED0", "blurb": "订一间 KTV，唱到尽兴"},
+  {"id": "escape", "name": "密室", "emoji": "🔑", "color": "#1F7A72", "blurb": "组队密室逃脱，限时破关"},
+  {"id": "script", "name": "剧本杀", "emoji": "🎭", "color": "#C4376A", "blurb": "分好角色，把故事演完"},
+  {"id": "board", "name": "桌游", "emoji": "🎲", "color": "#2E7D4F", "blurb": "狼人杀、阿瓦隆或派对游戏"},
+  {"id": "movie", "name": "电影", "emoji": "🎬", "color": "#3C5A8A", "blurb": "一起看电影，包场也行"},
+  {"id": "party", "name": "轰趴", "emoji": "🎉", "color": "#4F7A28", "blurb": "订个轰趴馆，吃喝玩到尽兴"},
+  {"id": "bbq", "name": "烧烤", "emoji": "🔥", "color": "#D2652D", "blurb": "炭火烤串，待到天黑也好"},
+  {"id": "sport", "name": "运动", "emoji": "🏸", "color": "#1F7E8C", "blurb": "羽毛球、飞盘或保龄球"},
+  {"id": "kart", "name": "卡丁车", "emoji": "🏎️", "color": "#C46A4A", "blurb": "组一队上赛道，比比谁更快"},
+  {"id": "diy", "name": "手工", "emoji": "🎨", "color": "#A14E86", "blurb": "陶艺、花艺或香薰，做完能带走"}
+]

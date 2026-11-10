@@ -1,0 +1,7 @@
+team-wheel.exe
+team-wheel.pdb
+cloudflared.exe
+data/rooms.json
+data/tunnel-url.txt
+*.tmp
+.tools/
