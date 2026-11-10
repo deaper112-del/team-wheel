@@ -1,0 +1,17 @@
+{
+  "name": "team-wheel",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "team-wheel",
+      "database_id": "69b4ab7e-2274-4079-b125-c7571fcb2b4d"
+    }
+  ]
+}

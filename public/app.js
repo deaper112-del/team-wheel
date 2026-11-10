@@ -184,8 +184,17 @@ function updateSoundButton() {
   soundBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
 }
 
+function isPrivateLan(host) {
+  if (host === "localhost" || host === "127.0.0.1") return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  return false;
+}
+
 function shareTarget() {
   const host = location.hostname;
+  if (!isPrivateLan(host)) return { url: location.origin, kind: "cloud" };
   const here = host === "localhost" || host === "127.0.0.1";
   if (!here) return { url: location.origin, kind: "current" };
   if (meta.publicUrl) return { url: String(meta.publicUrl).replace(/\/$/, ""), kind: "public" };
@@ -232,7 +241,9 @@ function renderShare() {
   document.getElementById("share-kicker").textContent = isHost() ? "先发到群里" : "转发给还没玩的同事";
   document.getElementById("copy").textContent = isHost() ? "复制邀请语到群里" : "复制链接";
   const note = document.getElementById("share-note");
-  if (target.kind === "public") {
+  if (target.kind === "cloud") {
+    note.textContent = "这个链接一直有效。电脑关机后，大家还能打开。只发给自己人。";
+  } else if (target.kind === "public") {
     note.textContent = "这个链接可以直接发到微信群，人不在公司也能打开。它是临时的，只发给自己人。";
   } else if (target.kind === "lan") {
     note.textContent = "同一个 Wi-Fi 里的同事可以打开。不在这个网络的人打不开。";
@@ -470,7 +481,9 @@ function updateCopy() {
     ? "这一局已经结束，下面是最终票数。"
     : "每个名字只能转一次。转到哪由电脑决定，转盘只是把结果演出来。";
   footnote.textContent = isHost()
-    ? "票数记在这台电脑上。网页可以关，不要关黑色的命令行窗口。"
+    ? (shareTarget().kind === "cloud"
+      ? "票数记在网上。电脑关机后，这个链接还能打开。"
+      : "票数记在这台电脑上。网页可以关，不要关黑色的命令行窗口。")
     : "每人只能转一次。最高票如果并列，就一起胜出。";
   const mine = getMine();
   if (spinning || holdResult) {
@@ -903,5 +916,8 @@ async function boot() {
 }
 
 boot().catch(() => {
-  lede.textContent = "转盘服务没连上。请确认黑色窗口还开着，然后刷新。";
+  const local = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  lede.textContent = local
+    ? "转盘服务没连上。请确认黑色窗口还开着，然后刷新。"
+    : "转盘暂时没连上，请刷新再试。";
 });

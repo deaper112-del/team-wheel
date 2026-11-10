@@ -5,3 +5,5 @@ data/rooms.json
 data/tunnel-url.txt
 *.tmp
 .tools/
+node_modules/
+.wrangler/

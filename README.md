@@ -1,12 +1,11 @@
 # 团建幸运大转盘
 
-手机打开同一个链接就能玩，不用连同一个 Wi-Fi。每人转一次算一票，票数最高的团建活动胜出。
+手机打开同一个链接就能玩，不用连同一个 Wi-Fi，电脑关机也能打开。每人转一次算一票，票数最高的团建活动胜出。
 
-## 怎么开
+直接发给同事的链接：
 
-1. 把 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) 的 `cloudflared.exe` 放在这个文件夹里。
-2. 双击 `启动转盘.bat`。电脑需要 Windows 和 .NET Framework。
-3. 不要关闭弹出的黑色窗口。窗口里会打印一行 `https://....trycloudflare.com`。
-4. 把那一行发到群里，大家用手机点开即可。
+https://team-wheel.team-wheel.workers.dev
 
-同一 Wi-Fi 时也可以用窗口里的局域网地址。关掉窗口、电脑休眠或重新启动后，公网链接会变，需要重新复制新链接。
+## 电脑上的备用启动
+
+同一台电脑上也可以双击 `启动转盘.bat`。那个窗口一关，只有本机和同一个 Wi-Fi 的临时链接会停。上面的网上链接不受影响。
