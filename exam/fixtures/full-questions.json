@@ -1,0 +1,52 @@
+{
+  "title": "综合测验",
+  "durationMinutes": 60,
+  "questions": [
+    {
+      "id": "1",
+      "type": "single",
+      "stem": "中国最长的河流是哪一条？",
+      "options": ["长江", "黄河", "珠江", "淮河"],
+      "score": 2
+    },
+    {
+      "id": "2",
+      "type": "multiple",
+      "stem": "下面哪些是水果？",
+      "options": ["苹果", "香蕉", "胡萝卜", "梨"],
+      "score": 4
+    },
+    {
+      "id": "3",
+      "type": "judge",
+      "stem": "地球是太阳系的行星。",
+      "score": 1
+    },
+    {
+      "id": "4",
+      "type": "blank",
+      "stem": "北京是中国的____。",
+      "blanks": 1,
+      "score": 2
+    },
+    {
+      "id": "5",
+      "type": "blank",
+      "stem": "____是____的首都。",
+      "blanks": 2,
+      "score": 4
+    },
+    {
+      "id": "6",
+      "type": "short",
+      "stem": "用一句话说明北京在中国的地位。",
+      "score": 10
+    },
+    {
+      "id": "7",
+      "type": "short",
+      "stem": "“少壮不努力”的下一句是什么？",
+      "score": 4
+    }
+  ]
+}
