@@ -60,13 +60,14 @@ export async function getPublicExam(): Promise<PublicExam | null> {
 
 export async function saveExam(paper: Paper, key: AnswerKey): Promise<string> {
   const rows = await sql<{ updated_at: Date | string }>(
-    `insert into exam_paper (id, title, duration_minutes, questions, answer_key, updated_at)
-     values (1, $1, $2, $3::jsonb, $4::jsonb, now())
+    `insert into exam_paper (id, title, duration_minutes, questions, answer_key, answers_released, updated_at)
+     values (1, $1, $2, $3::jsonb, $4::jsonb, false, now())
      on conflict (id) do update set
        title = excluded.title,
        duration_minutes = excluded.duration_minutes,
        questions = excluded.questions,
        answer_key = excluded.answer_key,
+       answers_released = false,
        updated_at = now()
      returning updated_at`,
     [paper.title, paper.durationMinutes, JSON.stringify(paper.questions), JSON.stringify(key)],

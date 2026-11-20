@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isAnswered } from "../grade";
-import type { GradeReport, Question, ResponseValue } from "../types";
+import { toCandidateReport } from "../reportView";
+import type { GradeItem, GradeReport, Question, ResponseValue } from "../types";
 import { sql } from "./db";
 import { gradeSaved, getPublicExam } from "./paper";
 
@@ -14,8 +15,29 @@ export type AttemptResult =
   | { ok: false; status: number; error: string };
 
 export type SubmitResult =
-  | { ok: true; name: string; report: GradeReport }
+  | { ok: true; name: string; report: GradeReport; released: boolean }
   | { ok: false; status: number; error: string };
+
+export interface ScoreRow {
+  name: string;
+  score: number;
+  total: number;
+}
+
+export interface QuestionRate {
+  id: string;
+  stem: string;
+  correct: number;
+  wrong: number;
+  total: number;
+}
+
+export interface RoundSnapshot {
+  released: boolean;
+  candidates: ScoreRow[];
+  hardest: QuestionRate | null;
+  easiest: QuestionRate | null;
+}
 
 function asJson<T>(value: unknown): T {
   if (typeof value === "string") return JSON.parse(value) as T;
@@ -47,16 +69,8 @@ function pastDeadline(started: Date | string, minutes: number | null): boolean {
   return Date.now() > Date.parse(deadline) + GRACE_MS;
 }
 
-function hideUnanswered(report: GradeReport, questions: Question[], responses: Record<string, ResponseValue | undefined>): GradeReport {
-  const byId = new Map(questions.map((question) => [question.id, question]));
-  return {
-    ...report,
-    items: report.items.map((item) => {
-      const question = byId.get(item.id);
-      if (question && isAnswered(question, responses[item.id])) return item;
-      return { ...item, reference: "", note: "" };
-    }),
-  };
+function releasedFlag(value: boolean | string | null | undefined): boolean {
+  return value === true || value === "t";
 }
 
 async function attemptLimited(name: string, clientKey: string): Promise<AttemptResult | null> {
@@ -116,10 +130,11 @@ export async function submitAttempt(token: string, responses: unknown): Promise<
     report: unknown;
     same_paper: boolean | string;
     duration_minutes: number | null;
+    answers_released: boolean | string;
   }>(
     `select a.name, a.started_at, a.submitted_at, a.report,
             (a.paper_updated_at = p.updated_at) as same_paper,
-            p.duration_minutes
+            p.duration_minutes, p.answers_released
      from exam_attempt a
      join exam_paper p on p.id = 1
      where a.token = $1`,
@@ -137,8 +152,9 @@ export async function submitAttempt(token: string, responses: unknown): Promise<
     return { ok: false, status: 400, error: "请先作答。" };
   }
 
+  const released = releasedFlag(attempt.answers_released);
   if (attempt.submitted_at != null && attempt.report != null) {
-    return { ok: true, name: attempt.name, report: asJson<GradeReport>(attempt.report) };
+    return { ok: true, name: attempt.name, released, report: toCandidateReport(asJson<GradeReport>(attempt.report), released) };
   }
   if (pastDeadline(attempt.started_at, attempt.duration_minutes)) {
     return { ok: false, status: 409, error: "时间已到。" };
@@ -146,23 +162,96 @@ export async function submitAttempt(token: string, responses: unknown): Promise<
 
   const graded = await gradeSaved(answers);
   if (!graded) return { ok: false, status: 409, error: "考试还没开始。" };
-  const report = hideUnanswered(graded, exam.questions, answers);
   const saved = await sql<{ report: unknown }>(
     `update exam_attempt
      set submitted_at = now(), report = $2::jsonb
      where token = $1 and submitted_at is null
      returning report`,
-    [token, JSON.stringify(report)],
+    [token, JSON.stringify(graded)],
   );
-  if (saved[0]?.report != null) {
-    return { ok: true, name: attempt.name, report: asJson<GradeReport>(saved[0].report) };
+  const stored = saved[0]?.report;
+  if (stored != null) {
+    return { ok: true, name: attempt.name, released, report: toCandidateReport(asJson<GradeReport>(stored), released) };
   }
   const again = await sql<{ report: unknown }>(
     "select report from exam_attempt where token = $1 and submitted_at is not null",
     [token],
   );
   if (again[0]?.report == null) return { ok: false, status: 409, error: "交卷失败，请再试一次。" };
-  return { ok: true, name: attempt.name, report: asJson<GradeReport>(again[0].report) };
+  return { ok: true, name: attempt.name, released, report: toCandidateReport(asJson<GradeReport>(again[0].report), released) };
+}
+
+export async function candidateResult(token: string): Promise<SubmitResult> {
+  if (!/^[a-f0-9]{64}$/.test(token)) return { ok: false, status: 400, error: "请先开始考试。" };
+  const rows = await sql<{ name: string; report: unknown; answers_released: boolean | string }>(
+    `select a.name, a.report, p.answers_released
+     from exam_attempt a
+     join exam_paper p on p.id = 1 and a.paper_updated_at = p.updated_at
+     where a.token = $1 and a.submitted_at is not null`,
+    [token],
+  );
+  const row = rows[0];
+  if (!row?.report) return { ok: false, status: 404, error: "还没有交卷。" };
+  const released = releasedFlag(row.answers_released);
+  return { ok: true, name: row.name, released, report: toCandidateReport(asJson<GradeReport>(row.report), released) };
+}
+
+function rateOf(item: QuestionRate): { correct: number; error: number } {
+  if (item.total <= 0) return { correct: 0, error: 0 };
+  return { correct: item.correct / item.total, error: item.wrong / item.total };
+}
+
+export async function roundResults(): Promise<RoundSnapshot | null> {
+  const paper = await sql<{ answers_released: boolean | string }>("select answers_released from exam_paper where id = 1");
+  if (!paper[0]) return null;
+  const rows = await sql<{ name: string; report: unknown }>(
+    `select a.name, a.report
+     from exam_attempt a
+     join exam_paper p on p.id = 1 and a.paper_updated_at = p.updated_at
+     where a.submitted_at is not null and a.report is not null
+     order by a.submitted_at`,
+  );
+  const candidates: ScoreRow[] = [];
+  const questions = new Map<string, QuestionRate>();
+  for (const row of rows) {
+    const report = asJson<GradeReport>(row.report);
+    candidates.push({ name: row.name, score: report.total, total: report.gradedMax });
+    for (const item of report.items) addQuestion(questions, item);
+  }
+  const ranked = [...questions.values()];
+  return {
+    released: releasedFlag(paper[0].answers_released),
+    candidates,
+    hardest: pickRate(ranked, "error"),
+    easiest: pickRate(ranked, "correct"),
+  };
+}
+
+function addQuestion(questions: Map<string, QuestionRate>, item: GradeItem): void {
+  const current = questions.get(item.id) ?? { id: item.id, stem: item.stem, correct: 0, wrong: 0, total: 0 };
+  current.total += 1;
+  if (item.status === "correct") current.correct += 1;
+  else if (item.status === "incorrect" || item.status === "partial" || item.status === "blank") current.wrong += 1;
+  questions.set(item.id, current);
+}
+
+function pickRate(items: QuestionRate[], kind: "error" | "correct"): QuestionRate | null {
+  if (items.length === 0) return null;
+  return [...items].sort((left, right) => {
+    const leftRate = rateOf(left)[kind];
+    const rightRate = rateOf(right)[kind];
+    if (rightRate !== leftRate) return rightRate - leftRate;
+    const leftCount = kind === "error" ? left.wrong : left.correct;
+    const rightCount = kind === "error" ? right.wrong : right.correct;
+    if (rightCount !== leftCount) return rightCount - leftCount;
+    return left.id.localeCompare(right.id, "zh");
+  })[0];
+}
+
+export async function releaseAnswers(): Promise<RoundSnapshot | null> {
+  const rows = await sql<{ id: number }>("update exam_paper set answers_released = true where id = 1 returning id");
+  if (!rows[0]) return null;
+  return roundResults();
 }
 
 function countAnsweredSafe(questions: Question[], responses: Record<string, ResponseValue | undefined>): number {

@@ -1,6 +1,7 @@
 import { formatDuration, paperSummary } from "./display";
 import { countAnswered } from "./grade";
-import { renderCandidate, renderExam, renderGate, renderProctor, renderResult } from "./render";
+import { renderCandidate, renderExam, renderGate, renderProctor, renderResult, type RoundSnapshot } from "./render";
+import { toCandidateReport } from "./reportView";
 import { clearProgress, loadProgress, saveProgress, wipeLegacyStore, type ProgressRecord } from "./storage";
 import { answerTemplateText, questionTemplateText, templateXlsxBytes } from "./templates";
 import type { GradeReport, Paper, Question, ResponseValue } from "./types";
@@ -32,6 +33,9 @@ interface State {
   startedAt: number | null;
   deadline: number | null;
   report: GradeReport | null;
+  released: boolean;
+  results: RoundSnapshot | null;
+  resultsNote: string;
   autoSubmitted: boolean;
   holdAuto: boolean;
 }
@@ -62,6 +66,9 @@ function fresh(): State {
     startedAt: null,
     deadline: null,
     report: null,
+    released: false,
+    results: null,
+    resultsNote: "",
     autoSubmitted: false,
     holdAuto: false,
   };
@@ -104,7 +111,7 @@ function persist(): void {
     responses: state.responses,
     startedAt: state.startedAt,
     deadline: state.deadline,
-    report: state.phase === "result" ? state.report : null,
+    report: state.phase === "result" && state.report ? toCandidateReport(state.report, state.released) : null,
     autoSubmitted: state.autoSubmitted,
   };
   try {
@@ -136,8 +143,9 @@ function render(): void {
     root.innerHTML = renderResult({
       paper,
       name: state.name,
-      report: state.report,
+      report: toCandidateReport(state.report, state.released),
       autoSubmitted: state.autoSubmitted,
+      released: state.released,
     });
     bindResult();
     return;
@@ -153,6 +161,8 @@ function render(): void {
       warning: state.warning,
       error: state.error,
       busy: state.busy,
+      results: state.results,
+      resultsNote: state.resultsNote,
     });
     bindProctor();
     return;
@@ -204,7 +214,8 @@ function restoreProgress(): void {
   state.deadline = typeof saved.deadline === "number" ? saved.deadline : null;
   state.responses = saved.responses || {};
   state.startedAt = saved.startedAt;
-  state.report = saved.report;
+  state.released = false;
+  state.report = saved.report ? toCandidateReport(saved.report, false) : null;
   state.autoSubmitted = saved.autoSubmitted;
   state.role = "candidate";
   state.phase = saved.phase === "result" && saved.report ? "result" : "exam";
@@ -299,6 +310,7 @@ async function startExam(name: string): Promise<void> {
     state.responses = {};
     state.startedAt = Date.now();
     state.report = null;
+    state.released = false;
     state.autoSubmitted = false;
     state.holdAuto = false;
     state.error = "";
@@ -356,7 +368,7 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: state.attemptToken, responses: state.responses }),
     });
-    const body = (await response.json()) as { error?: string; report?: GradeReport };
+    const body = (await response.json()) as { error?: string; report?: GradeReport; released?: boolean };
     if (!response.ok || !body.report) {
       state.error = body.error || "交卷失败，请再试一次。";
       state.phase = "exam";
@@ -364,7 +376,8 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
       render();
       return;
     }
-    state.report = body.report;
+    state.released = Boolean(body.released);
+    state.report = toCandidateReport(body.report, state.released);
     state.autoSubmitted = auto;
     state.phase = "result";
     state.error = "";
@@ -391,6 +404,7 @@ async function retry(): Promise<void> {
     state.responses = {};
     state.startedAt = Date.now();
     state.report = null;
+    state.released = false;
     state.autoSubmitted = false;
     state.holdAuto = false;
     state.error = "";
@@ -414,6 +428,7 @@ function leaveExam(): void {
   state.startedAt = null;
   state.deadline = null;
   state.report = null;
+  state.released = false;
   state.autoSubmitted = false;
   state.holdAuto = false;
   state.role = "candidate";
@@ -490,6 +505,8 @@ async function publish(): Promise<void> {
     state.answerFile = null;
     state.questionLabel = "";
     state.answerLabel = "";
+    state.results = null;
+    state.resultsNote = "";
     state.error = "";
   } catch {
     state.error = "发布失败，请再试一次。";
@@ -534,6 +551,75 @@ function bindProctor(): void {
     download("考试模板.xlsx", new Blob([copy], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   });
   document.getElementById("back-gate")?.addEventListener("click", () => setRole("gate"));
+  document.getElementById("load-results")?.addEventListener("click", () => {
+    void loadResults(false);
+  });
+  document.getElementById("release-answers")?.addEventListener("click", () => {
+    if (!window.confirm("公布后，考生可以查看正确答案。确定公布吗？")) return;
+    void loadResults(true);
+  });
+}
+
+async function loadResults(release: boolean): Promise<void> {
+  const input = document.getElementById("proctor-pass");
+  const passphrase = input instanceof HTMLInputElement ? input.value : state.passphrase;
+  state.passphrase = passphrase;
+  if (!passphrase) {
+    state.error = "请填写监考口令。";
+    render();
+    return;
+  }
+  state.busy = true;
+  state.error = "";
+  render();
+  try {
+    const response = await fetch(release ? "/api/proctor/release" : "/api/proctor/results", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    const body = (await response.json()) as RoundSnapshot & { error?: string };
+    if (!response.ok || !Array.isArray(body.candidates)) {
+      state.error = body.error || (release ? "无法公布答案。" : "无法查看成绩。");
+      state.busy = false;
+      render();
+      return;
+    }
+    state.results = body;
+    state.resultsNote = release || body.released ? "答案已向考生公布。" : "";
+    state.error = "";
+  } catch {
+    state.error = release ? "无法公布答案。" : "无法查看成绩。";
+  }
+  state.busy = false;
+  render();
+}
+
+async function refreshResult(): Promise<void> {
+  if (!state.attemptToken) return;
+  try {
+    const response = await fetch("/api/result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: state.attemptToken }),
+    });
+    const body = (await response.json()) as { error?: string; name?: string; report?: GradeReport; released?: boolean };
+    if (!response.ok || !body.report) {
+      state.error = body.error || "无法查看成绩。";
+      render();
+      return;
+    }
+    state.released = Boolean(body.released);
+    state.report = toCandidateReport(body.report, state.released);
+    if (body.name) state.name = body.name;
+    state.phase = "result";
+    state.error = "";
+    persist();
+  } catch {
+    state.error = "无法查看成绩。";
+  }
+  render();
+  window.scrollTo(0, 0);
 }
 
 function bindExam(): void {
@@ -565,6 +651,9 @@ function bindExam(): void {
 }
 
 function bindResult(): void {
+  document.getElementById("refresh-result")?.addEventListener("click", () => {
+    void refreshResult();
+  });
   document.getElementById("retry")?.addEventListener("click", () => {
     void retry();
   });
@@ -602,6 +691,10 @@ export function boot(): void {
     }
     if (gen !== bootGen) return;
     if (roleFromHash() !== "proctor") restoreProgress();
+    if (state.phase === "result") {
+      await refreshResult();
+      return;
+    }
     if (state.phase === "exam" && (remainingMs() ?? 1) <= 0) {
       await submit(true, true);
       return;

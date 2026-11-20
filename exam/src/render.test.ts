@@ -76,8 +76,12 @@ describe("renderExam", () => {
       warning: "",
       error: "",
       busy: false,
+      results: null,
+      resultsNote: "",
     });
     expect(proctor).toContain("题目文件");
+    expect(proctor).toContain("查看成绩");
+    expect(proctor).toContain("公布答案");
     expect(proctor).toContain("答案文件");
     expect(proctor).toContain("监考口令");
     expect(proctor).toContain("PDF");
@@ -98,11 +102,24 @@ describe("renderResult", () => {
     const report = gradePaper(parsed.content.paper, answers.content.key, {
       "5": { type: "short", text: "关键词1" },
     });
+    const hidden = renderResult({
+      paper: parsed.content.paper,
+      name: "周宁",
+      report,
+      autoSubmitted: false,
+      released: false,
+    });
+    expect(hidden).toContain("5");
+    expect(hidden).not.toContain("参考答案");
+    expect(hidden).not.toContain("关键词2");
+    expect(hidden).toContain("监考还没有公布答案");
+
     const html = renderResult({
       paper: parsed.content.paper,
       name: "周宁",
       report,
       autoSubmitted: false,
+      released: true,
     });
     expect(html).toContain("5");
     expect(html).toContain("部分正确");

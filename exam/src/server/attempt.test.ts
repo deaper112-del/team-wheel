@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { POST as grade } from "../../app/api/grade/route";
 import { POST as attempt } from "../../app/api/attempt/route";
+import { POST as result } from "../../app/api/result/route";
+import { POST as release } from "../../app/api/proctor/release/route";
+import { POST as results } from "../../app/api/proctor/results/route";
 import { sql } from "./db";
 import { saveExam } from "./paper";
 import { proctorAttemptsBlocked, recordProctorFailure } from "./proctorLimit";
@@ -69,12 +72,61 @@ describe("grade access", () => {
 
     const submitted = await post(grade, { token, responses: { "1": { type: "single", index: 1 } } });
     expect(submitted.status).toBe(200);
-    const report = JSON.parse(submitted.text) as { name: string; report: { total: number; items: { id: string; reference: string }[] } };
+    const report = JSON.parse(submitted.text) as {
+      name: string;
+      released: boolean;
+      report: { total: number; items: { id: string; reference: string }[] };
+    };
     expect(report.name).toBe("李明");
+    expect(report.released).toBe(false);
     expect(report.report.total).toBe(2);
-    expect(report.report.items.find((item) => item.id === "1")?.reference).toContain("乙");
-    expect(report.report.items.find((item) => item.id === "2")?.reference).toBe("");
+    expect(report.report.items.every((item) => item.reference === "")).toBe(true);
     expect(submitted.text).not.toContain("独有暗号");
+    expect(submitted.text).not.toContain("要点");
+
+    const before = await post(result, { token });
+    expect(before.status).toBe(200);
+    expect(before.text).not.toContain("独有暗号");
+    expect(before.text).not.toContain("要点");
+
+    process.env.PROCTOR_PASSPHRASE = "exam-test-pass";
+    try {
+      const scores = await post(results, { passphrase: "exam-test-pass" });
+      expect(scores.status).toBe(200);
+      expect(scores.text).toContain("李明");
+      expect(scores.text).not.toContain("独有暗号");
+      expect(scores.text).not.toContain("要点");
+      const snap = JSON.parse(scores.text) as {
+        hardest: { id: string; wrong: number; total: number };
+        easiest: { id: string; correct: number; total: number };
+        candidates: { name: string; score: number }[];
+      };
+      expect(snap.candidates[0]?.score).toBe(2);
+      expect(snap.hardest.id).toBe("2");
+      expect(snap.hardest.wrong).toBe(1);
+      expect(snap.hardest.total).toBe(1);
+      expect(snap.easiest.id).toBe("1");
+      expect(snap.easiest.correct).toBe(1);
+      expect(snap.easiest.total).toBe(1);
+
+      const denied = await post(results, { passphrase: "nope" });
+      expect(denied.status).toBe(401);
+      expect(denied.text).not.toContain("独有暗号");
+
+      const opened = await post(release, { passphrase: "exam-test-pass" });
+      expect(opened.status).toBe(200);
+      expect(opened.text).not.toContain("独有暗号");
+    } finally {
+      delete process.env.PROCTOR_PASSPHRASE;
+    }
+
+    const after = await post(result, { token });
+    expect(after.status).toBe(200);
+    const revealed = JSON.parse(after.text) as { released: boolean; report: { items: { id: string; reference: string; status: string }[] } };
+    expect(revealed.released).toBe(true);
+    expect(revealed.report.items.find((item) => item.id === "1")?.reference).toContain("乙");
+    expect(revealed.report.items.find((item) => item.id === "2")?.reference).toContain("独有暗号");
+    expect(revealed.report.items.find((item) => item.id === "2")?.status).toBe("blank");
   });
 
   it("caps how many times one name can start", async () => {

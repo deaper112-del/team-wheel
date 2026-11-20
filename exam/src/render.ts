@@ -34,6 +34,27 @@ export interface CandidateView {
   note: string;
 }
 
+export interface ScoreRow {
+  name: string;
+  score: number;
+  total: number;
+}
+
+export interface QuestionRate {
+  id: string;
+  stem: string;
+  correct: number;
+  wrong: number;
+  total: number;
+}
+
+export interface RoundSnapshot {
+  released: boolean;
+  candidates: ScoreRow[];
+  hardest: QuestionRate | null;
+  easiest: QuestionRate | null;
+}
+
 export interface ProctorView {
   passphrase: string;
   questionLabel: string;
@@ -43,6 +64,8 @@ export interface ProctorView {
   warning: string;
   error: string;
   busy: boolean;
+  results: RoundSnapshot | null;
+  resultsNote: string;
 }
 
 export interface ResultView {
@@ -50,6 +73,7 @@ export interface ResultView {
   name: string;
   report: GradeReport;
   autoSubmitted: boolean;
+  released: boolean;
 }
 
 export function esc(value: string): string {
@@ -155,7 +179,7 @@ export function renderProctor(view: ProctorView): string {
           <p>JSON 题目包含 title、可选的 durationMinutes（分钟）和 questions。每题写 id、type、stem、score。type 取 single（单选）、multiple（多选）、judge（判断）、blank（填空）、short（简答）。单选和多选要有 options，填空要有 blanks。</p>
           <p>JSON 答案包含 answers。选择题的 answer 可以是字母 A、选项原文，或从 0 开始的序号。多选写成数组，例如 ["A","C"]。判断写 true 或 false。填空按空的顺序写；一个空有多个答案时套一层数组，例如 [["首都","北京"],["中国"]]。简答的 answer 是参考答案，keywords 是关键词。</p>
           <p>Excel 可以用「题目」「答案」两张表，放在同一个文件或分成两个文件。题目列：题号、题型、题干、选项A 到 选项F、分值、空数。题型填单选、多选、判断、填空、简答。答案列：题号、答案、关键词。多选写成 A,C。判断填对或错。填空用 | 分隔各空，用 / 分隔同一空的多个答案。简答关键词用逗号分隔。题目表可加可选列「时长」表示整场分钟数。</p>
-          <p>PDF 分成题目卷和答案卷上传。大题标题写成「一、选择题」「二、多选题」「三、判断题」「四、填空题」「五、简答题」。选择题在标题里写「每题 N 分」，选项单独成行，如 A. B.。填空在标题里写「每空 N 分」，空用下划线留出。简答在题干末尾写（N分）。答案卷用同一题号：选择题写「1. B」，多选写「1. A、C」，判断写「1. 对」，填空直接写答案，需要时加「可接受：」。简答写「参考要点」，按其中的关键词比例给分，交卷后会显示参考要点。建议用时不会自动交卷，只有写明「限时 N 分钟」才倒计时。</p>
+          <p>PDF 分成题目卷和答案卷上传。大题标题写成「一、选择题」「二、多选题」「三、判断题」「四、填空题」「五、简答题」。选择题在标题里写「每题 N 分」，选项单独成行，如 A. B.。填空在标题里写「每空 N 分」，空用下划线留出。简答在题干末尾写（N分）。答案卷用同一题号：选择题写「1. B」，多选写「1. A、C」，判断写「1. 对」，填空直接写答案，需要时加「可接受：」。简答写「参考要点」，按其中的关键词比例给分。监考公布答案后，考生才能看到参考要点。建议用时不会自动交卷，只有写明「限时 N 分钟」才倒计时。</p>
         </div>
       </details>
       ${banner("info", view.info)}
@@ -166,7 +190,47 @@ export function renderProctor(view: ProctorView): string {
         <button type="button" class="ghost" id="back-gate">返回</button>
       </div>
     </form>
+    <section class="card" id="proctor-results">
+      <h2>本场成绩</h2>
+      <p class="fine">查看这一场已经交卷的考生。公布答案之后，考生重新打开成绩就能看到正确答案。</p>
+      <div class="row-actions">
+        <button type="button" class="primary" id="load-results"${view.busy ? " disabled" : ""}>查看成绩</button>
+        <button type="button" class="ghost" id="release-answers"${view.busy ? " disabled" : ""}>公布答案</button>
+      </div>
+      ${banner("info", view.resultsNote)}
+      ${resultsBody(view.results)}
+    </section>
   </div>`;
+}
+
+function clipStem(stem: string): string {
+  const text = stem.replace(/\s+/g, " ").trim();
+  return text.length > 42 ? `${text.slice(0, 42)}…` : text;
+}
+
+function rateLine(label: string, item: QuestionRate | null, kind: "wrong" | "correct"): string {
+  if (!item) return "";
+  const count = kind === "wrong" ? item.wrong : item.correct;
+  const verb = kind === "wrong" ? "答错" : "答对";
+  return `<p><strong>${esc(label)}</strong> 题号 ${esc(item.id)}，${count} / ${item.total} 人${verb}。${esc(clipStem(item.stem))}</p>`;
+}
+
+function resultsBody(results: RoundSnapshot | null): string {
+  if (!results) return "";
+  if (results.candidates.length === 0) return `<p class="fine">还没有人交卷。</p>`;
+  const rows = results.candidates
+    .map(
+      (row) =>
+        `<tr><td>${esc(row.name)}</td><td>${esc(formatPoints(row.score))} / ${esc(formatPoints(row.total))}</td></tr>`,
+    )
+    .join("");
+  return `<p class="fine">${results.released ? "答案已公布。" : "答案尚未公布。"}已交卷 ${results.candidates.length} 份。</p>
+    <table class="score-table">
+      <thead><tr><th>姓名</th><th>得分</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${rateLine("答错最多", results.hardest, "wrong")}
+    ${rateLine("答对最多", results.easiest, "correct")}`;
 }
 
 function responseOf(question: Question, responses: ExamView["responses"]): ResponseValue | undefined {
@@ -299,8 +363,18 @@ export function renderExam(view: ExamView): string {
   </div>`;
 }
 
+function whyText(item: GradeReport["items"][number]): string {
+  if (item.status === "correct") return "回答正确。";
+  if (item.status === "incorrect") return "这道题答错了。";
+  if (item.status === "partial") return item.note || "只答对了一部分。";
+  if (item.status === "blank") return "这道题没有作答。";
+  return item.note || "这道题无法评分。";
+}
+
 export function renderResult(view: ResultView): string {
-  const { report } = view;
+  const report = view.released
+    ? view.report
+    : { ...view.report, items: view.report.items.map((item) => ({ ...item, reference: "", note: "" })) };
   const missing =
     report.missingIds.length > 0
       ? banner("warn", `以下题号在答案文件中没有对应答案，无法评分：${report.missingIds.join("、")}。`)
@@ -320,7 +394,8 @@ export function renderResult(view: ResultView): string {
         item.status === "ungraded"
           ? STATUS_LABEL.ungraded
           : `${formatPoints(item.earned)} / ${formatPoints(item.score)} · ${STATUS_LABEL[item.status]}`;
-      const note = item.note ? `<p class="note">${esc(item.note)}</p>` : "";
+      const why = view.released ? `<p class="note">${esc(whyText(item))}</p>` : "";
+      const note = view.released && item.note && item.note !== whyText(item) ? `<p class="note">${esc(item.note)}</p>` : "";
       return `<article class="review ${item.status}">
         <header>
           <span>题号 ${esc(item.id)} · ${TYPE_LABEL[item.type]}</span>
@@ -328,7 +403,8 @@ export function renderResult(view: ResultView): string {
         </header>
         <p class="stem">${esc(item.stem)}</p>
         <p><span class="k">你的答案</span> ${esc(item.yours)}</p>
-        ${item.reference ? `<p class="reference"><span class="k">参考答案</span> ${esc(item.reference)}</p>` : ""}
+        ${view.released && item.reference ? `<p class="reference"><span class="k">参考答案</span> ${esc(item.reference)}</p>` : ""}
+        ${why}
         ${note}
       </article>`;
     })
@@ -350,13 +426,15 @@ export function renderResult(view: ResultView): string {
       <p class="score-hero"><strong>${formatPoints(report.total)}</strong><span> / ${formatPoints(report.gradedMax)}</span></p>
       <p class="fine">可评分满分 ${formatPoints(report.gradedMax)} 分。</p>
       ${excludedNote}
+      ${view.released ? "" : `<p class="fine">监考还没有公布答案。公布之后，点「查看答案」可以看到正确答案，以及错在哪里。</p>`}
       ${missing}
       ${invalid}
     </section>
     <section class="card">
-      ${items}
+      ${view.released ? items : ""}
       <div class="row-actions">
-        <button type="button" class="primary" id="retry">再考一次</button>
+        <button type="button" class="primary" id="refresh-result">查看答案</button>
+        <button type="button" class="ghost" id="retry">再考一次</button>
         <button type="button" class="ghost" id="reset">返回首页</button>
       </div>
     </section>

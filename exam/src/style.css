@@ -100,6 +100,29 @@ h2 {
 
 .card + .card { margin-top: 14px; }
 
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.score-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.score-table th,
+.score-table td {
+  text-align: left;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.score-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .lede, .summary { margin: 0 0 16px; }
 
 .uploads {
