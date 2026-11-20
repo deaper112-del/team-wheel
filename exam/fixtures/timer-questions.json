@@ -1,0 +1,12 @@
+{
+  "title": "限时三秒",
+  "durationMinutes": 0.05,
+  "questions": [
+    {
+      "id": "1",
+      "type": "judge",
+      "stem": "地球是太阳系的行星。",
+      "score": 1
+    }
+  ]
+}
