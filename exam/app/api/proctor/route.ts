@@ -4,6 +4,7 @@ import { parseExamFile } from "../../../src/parse";
 import { json, readFileEntry } from "../../../src/server/http";
 import { saveExam } from "../../../src/server/paper";
 import { proctorPassphraseConfigured, proctorPassphraseMatches } from "../../../src/server/passphrase";
+import { proctorAttemptsBlocked, recordProctorFailure } from "../../../src/server/proctorLimit";
 import type { FileContent } from "../../../src/types";
 
 async function readContent(file: File, label: string): Promise<{ content: FileContent } | { error: string }> {
@@ -14,6 +15,7 @@ async function readContent(file: File, label: string): Promise<{ content: FileCo
 
 export async function POST(request: Request): Promise<Response> {
   if (!proctorPassphraseConfigured()) return json({ error: "监考口令还没有配置。" }, 503);
+  if (await proctorAttemptsBlocked()) return json({ error: "口令尝试过于频繁，请稍后再试。" }, 429);
   let form: FormData;
   try {
     form = await request.formData();
@@ -21,7 +23,10 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "无法读取上传的文件。" }, 400);
   }
   const passphrase = String(form.get("passphrase") ?? "");
-  if (!proctorPassphraseMatches(passphrase)) return json({ error: "口令不对。" }, 401);
+  if (!proctorPassphraseMatches(passphrase)) {
+    await recordProctorFailure();
+    return json({ error: "口令不对。" }, 401);
+  }
 
   const question = await readFileEntry(form.get("question"));
   const answer = await readFileEntry(form.get("answer"));

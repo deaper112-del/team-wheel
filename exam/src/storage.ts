@@ -8,6 +8,7 @@ export interface ProgressRecord {
   updatedAt: string;
   phase: "exam" | "result";
   name: string;
+  attemptToken: string;
   responses: Record<string, ResponseValue>;
   startedAt: number | null;
   report: GradeReport | null;
@@ -25,6 +26,7 @@ export function loadProgress(): ProgressRecord | null {
     if (!raw) return null;
     const value = JSON.parse(raw) as ProgressRecord;
     if (value.version !== 2 || (value.phase !== "exam" && value.phase !== "result")) return null;
+    if (typeof value.attemptToken !== "string" || value.attemptToken === "") return null;
     return value;
   } catch {
     return null;

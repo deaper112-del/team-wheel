@@ -1,6 +1,5 @@
-import { gradeSaved } from "../../../src/server/paper";
+import { submitAttempt } from "../../../src/server/attempt";
 import { json } from "../../../src/server/http";
-import type { ResponseValue } from "../../../src/types";
 
 export async function POST(request: Request): Promise<Response> {
   let text: string;
@@ -17,14 +16,9 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "答卷格式无法识别。" }, 400);
   }
   if (typeof body !== "object" || body === null) return json({ error: "答卷格式无法识别。" }, 400);
-  const raw = body as { name?: unknown; responses?: unknown };
-  const name = typeof raw.name === "string" ? raw.name.trim() : "";
-  if (!name) return json({ error: "请填写考生姓名。" }, 400);
-  if (name.length > 30) return json({ error: "姓名请控制在 30 个字以内。" }, 400);
-  if (typeof raw.responses !== "object" || raw.responses === null || Array.isArray(raw.responses)) {
-    return json({ error: "答卷格式无法识别。" }, 400);
-  }
-  const report = await gradeSaved(raw.responses as Record<string, ResponseValue | undefined>);
-  if (!report) return json({ error: "考试还没开始。" }, 409);
-  return json({ name, report });
+  const raw = body as { token?: unknown; responses?: unknown };
+  const token = typeof raw.token === "string" ? raw.token : "";
+  const result = await submitAttempt(token, raw.responses);
+  if (!result.ok) return json({ error: result.error }, result.status);
+  return json({ name: result.name, report: result.report });
 }

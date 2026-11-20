@@ -27,10 +27,12 @@ interface State {
   warning: string;
   error: string;
   busy: boolean;
+  attemptToken: string;
   responses: Record<string, ResponseValue>;
   startedAt: number | null;
   report: GradeReport | null;
   autoSubmitted: boolean;
+  holdAuto: boolean;
 }
 
 const app = () => document.querySelector<HTMLElement>("#app");
@@ -54,10 +56,12 @@ function fresh(): State {
     warning: "",
     error: "",
     busy: false,
+    attemptToken: "",
     responses: {},
     startedAt: null,
     report: null,
     autoSubmitted: false,
+    holdAuto: false,
   };
 }
 
@@ -95,9 +99,10 @@ function persist(): void {
     updatedAt: state.exam.updatedAt,
     phase: state.phase,
     name: state.name,
+    attemptToken: state.attemptToken,
     responses: state.responses,
     startedAt: state.startedAt,
-    report: state.report,
+    report: state.phase === "result" ? state.report : null,
     autoSubmitted: state.autoSubmitted,
   };
   try {
@@ -184,11 +189,12 @@ async function loadExam(): Promise<void> {
 
 function restoreProgress(): void {
   const saved = loadProgress();
-  if (!saved || !state.exam || saved.updatedAt !== state.exam.updatedAt) {
+  if (!saved || !state.exam || saved.updatedAt !== state.exam.updatedAt || !saved.attemptToken) {
     clearProgress();
     return;
   }
   state.name = saved.name;
+  state.attemptToken = saved.attemptToken;
   state.responses = saved.responses || {};
   state.startedAt = saved.startedAt;
   state.report = saved.report;
@@ -241,7 +247,26 @@ function updateProgress(): void {
   progress.textContent = `已答 ${countAnswered(paper.questions, state.responses)} / ${paper.questions.length}`;
 }
 
-function startExam(name: string): void {
+let starting = false;
+
+async function beginAttempt(name: string): Promise<boolean> {
+  const response = await fetch("/api/attempt", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const body = (await response.json()) as { error?: string; token?: string; name?: string };
+  if (!response.ok || !body.token) {
+    state.error = body.error || "无法开始考试。";
+    return false;
+  }
+  state.attemptToken = body.token;
+  state.name = body.name || name;
+  return true;
+}
+
+async function startExam(name: string): Promise<void> {
+  if (starting) return;
   const trimmed = name.trim();
   if (!state.exam) {
     state.error = "考试还没开始。";
@@ -253,16 +278,30 @@ function startExam(name: string): void {
     render();
     return;
   }
-  state.name = trimmed;
-  state.phase = "exam";
-  state.responses = {};
-  state.startedAt = Date.now();
-  state.report = null;
-  state.autoSubmitted = false;
+  starting = true;
   state.error = "";
-  persist();
-  render();
-  window.scrollTo(0, 0);
+  try {
+    const ok = await beginAttempt(trimmed);
+    if (!ok) {
+      render();
+      return;
+    }
+    state.phase = "exam";
+    state.responses = {};
+    state.startedAt = Date.now();
+    state.report = null;
+    state.autoSubmitted = false;
+    state.holdAuto = false;
+    state.error = "";
+    persist();
+    render();
+    window.scrollTo(0, 0);
+  } catch {
+    state.error = "无法开始考试。";
+    render();
+  } finally {
+    starting = false;
+  }
 }
 
 function startTicker(): void {
@@ -278,6 +317,8 @@ function startTicker(): void {
     }
     if (left <= 0) {
       stopTicker();
+      if (state.holdAuto) return;
+      state.holdAuto = true;
       void submit(true);
     }
   };
@@ -304,7 +345,7 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
     const response = await fetch("/api/grade", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: state.name, responses: state.responses }),
+      body: JSON.stringify({ token: state.attemptToken, responses: state.responses }),
     });
     const body = (await response.json()) as { error?: string; report?: GradeReport };
     if (!response.ok || !body.report) {
@@ -328,26 +369,43 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
   window.scrollTo(0, 0);
 }
 
-function retry(): void {
-  if (!state.exam) return;
-  state.phase = "exam";
-  state.responses = {};
-  state.startedAt = Date.now();
-  state.report = null;
-  state.autoSubmitted = false;
-  persist();
-  render();
-  window.scrollTo(0, 0);
+async function retry(): Promise<void> {
+  if (starting || !state.exam || !state.name) return;
+  starting = true;
+  try {
+    const ok = await beginAttempt(state.name);
+    if (!ok) {
+      render();
+      return;
+    }
+    state.phase = "exam";
+    state.responses = {};
+    state.startedAt = Date.now();
+    state.report = null;
+    state.autoSubmitted = false;
+    state.holdAuto = false;
+    state.error = "";
+    persist();
+    render();
+    window.scrollTo(0, 0);
+  } catch {
+    state.error = "无法开始考试。";
+    render();
+  } finally {
+    starting = false;
+  }
 }
 
 function leaveExam(): void {
   stopTicker();
   clearProgress();
   state.phase = "setup";
+  state.attemptToken = "";
   state.responses = {};
   state.startedAt = null;
   state.report = null;
   state.autoSubmitted = false;
+  state.holdAuto = false;
   state.role = "candidate";
   render();
   window.scrollTo(0, 0);
@@ -373,7 +431,7 @@ function bindCandidate(): void {
   document.getElementById("candidate-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const input = document.getElementById("candidate-name");
-    startExam(input instanceof HTMLInputElement ? input.value : state.name);
+    void startExam(input instanceof HTMLInputElement ? input.value : state.name);
   });
   document.getElementById("candidate-name")?.addEventListener("input", (event) => {
     const input = event.target;
@@ -497,7 +555,9 @@ function bindExam(): void {
 }
 
 function bindResult(): void {
-  document.getElementById("retry")?.addEventListener("click", () => retry());
+  document.getElementById("retry")?.addEventListener("click", () => {
+    void retry();
+  });
   document.getElementById("reset")?.addEventListener("click", () => leaveExam());
 }
 
