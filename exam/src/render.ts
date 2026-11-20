@@ -74,14 +74,14 @@ export function renderSetup(view: SetupView): string {
         <label class="file">
           <span class="file-kicker">题目文件</span>
           <span class="file-name">${esc(view.questionLabel || "尚未选择")}</span>
-          <span class="file-hint">JSON 或 Excel</span>
-          <input id="question-file" type="file" accept=".json,.xlsx,.xls,application/json" aria-label="题目文件">
+          <span class="file-hint">JSON、Excel 或 PDF</span>
+          <input id="question-file" type="file" accept=".json,.xlsx,.xls,.pdf,application/json,application/pdf" aria-label="题目文件">
         </label>
         <label class="file">
           <span class="file-kicker">答案文件</span>
           <span class="file-name">${esc(view.answerLabel || "尚未选择")}</span>
-          <span class="file-hint">可与题目放在同一个 Excel</span>
-          <input id="answer-file" type="file" accept=".json,.xlsx,.xls,application/json" aria-label="答案文件">
+          <span class="file-hint">JSON、Excel 或 PDF</span>
+          <input id="answer-file" type="file" accept=".json,.xlsx,.xls,.pdf,application/json,application/pdf" aria-label="答案文件">
         </label>
       </div>
       <div class="template-row">
@@ -96,6 +96,7 @@ export function renderSetup(view: SetupView): string {
           <p>JSON 题目包含 title、可选的 durationMinutes（分钟）和 questions。每题写 id、type、stem、score。type 取 single（单选）、multiple（多选）、judge（判断）、blank（填空）、short（简答）。单选和多选要有 options，填空要有 blanks。</p>
           <p>JSON 答案包含 answers。选择题的 answer 可以是字母 A、选项原文，或从 0 开始的序号。多选写成数组，例如 ["A","C"]。判断写 true 或 false。填空按空的顺序写；一个空有多个答案时套一层数组，例如 [["首都","北京"],["中国"]]。简答的 answer 是参考答案，keywords 是关键词。</p>
           <p>Excel 可以用「题目」「答案」两张表，放在同一个文件或分成两个文件。题目列：题号、题型、题干、选项A 到 选项F、分值、空数。题型填单选、多选、判断、填空、简答。答案列：题号、答案、关键词。多选写成 A,C。判断填对或错。填空用 | 分隔各空，用 / 分隔同一空的多个答案。简答关键词用逗号分隔。题目表可加可选列「时长」表示整场分钟数。</p>
+          <p>PDF 分成题目卷和答案卷上传。大题标题写成「一、选择题」「二、多选题」「三、判断题」「四、填空题」「五、简答题」。选择题在标题里写「每题 N 分」，选项单独成行，如 A. B.。填空在标题里写「每空 N 分」，空用下划线留出。简答在题干末尾写（N分）。答案卷用同一题号：选择题写「1. B」，多选写「1. A、C」，判断写「1. 对」，填空直接写答案，需要时加「可接受：」。简答写「参考要点」，按其中的关键词比例给分，交卷后会显示参考要点。建议用时不会自动交卷，只有写明「限时 N 分钟」才倒计时。</p>
         </div>
       </details>
       <label class="name-field" for="candidate-name">考生姓名

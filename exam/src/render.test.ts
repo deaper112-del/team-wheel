@@ -61,6 +61,7 @@ describe("renderExam", () => {
     expect(html).toContain("题目 JSON");
     expect(html).toContain("答案 JSON");
     expect(html).toContain("Excel");
+    expect(html).toContain("PDF");
     expect(html).toContain("文件格式说明");
     expect(html).not.toContain("单选题");
     expect(html).not.toContain("type=\"radio\"");

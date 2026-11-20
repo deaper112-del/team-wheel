@@ -389,11 +389,13 @@ export function parseXlsxBuffer(buffer: ArrayBuffer): ParseOutcome {
   return parseWorkbook(workbook);
 }
 
-function detectKind(name: string, buffer: ArrayBuffer): "json" | "xlsx" | "unknown" {
+function detectKind(name: string, buffer: ArrayBuffer): "json" | "xlsx" | "pdf" | "unknown" {
   const lower = name.toLowerCase();
   if (lower.endsWith(".json")) return "json";
+  if (lower.endsWith(".pdf")) return "pdf";
   if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "xlsx";
   const bytes = new Uint8Array(buffer.slice(0, 8));
+  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return "pdf";
   if (bytes[0] === 0x50 && bytes[1] === 0x4b) return "xlsx";
   if (bytes[0] === 0xd0 && bytes[1] === 0xcf) return "xlsx";
   const head = new TextDecoder()
@@ -422,5 +424,9 @@ export async function parseExamFile(file: File): Promise<ParseOutcome> {
     }
     return parsed;
   }
-  return { ok: false, error: "无法识别文件。请上传 JSON 或 Excel（.xlsx）。" };
+  if (kind === "pdf") {
+    const { parsePdfBuffer } = await import("./pdf");
+    return parsePdfBuffer(buffer);
+  }
+  return { ok: false, error: "无法识别文件。请上传 JSON、Excel（.xlsx）或 PDF。" };
 }
