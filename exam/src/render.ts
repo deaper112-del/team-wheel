@@ -328,7 +328,7 @@ export function renderResult(view: ResultView): string {
         </header>
         <p class="stem">${esc(item.stem)}</p>
         <p><span class="k">你的答案</span> ${esc(item.yours)}</p>
-        <p class="reference"><span class="k">参考答案</span> ${esc(item.reference)}</p>
+        ${item.reference ? `<p class="reference"><span class="k">参考答案</span> ${esc(item.reference)}</p>` : ""}
         ${note}
       </article>`;
     })

@@ -30,6 +30,7 @@ interface State {
   attemptToken: string;
   responses: Record<string, ResponseValue>;
   startedAt: number | null;
+  deadline: number | null;
   report: GradeReport | null;
   autoSubmitted: boolean;
   holdAuto: boolean;
@@ -59,6 +60,7 @@ function fresh(): State {
     attemptToken: "",
     responses: {},
     startedAt: null,
+    deadline: null,
     report: null,
     autoSubmitted: false,
     holdAuto: false,
@@ -75,9 +77,8 @@ function paperOf(): Paper | null {
 }
 
 function remainingMs(): number | null {
-  const paper = paperOf();
-  if (!paper?.durationMinutes || state.startedAt == null) return null;
-  return state.startedAt + paper.durationMinutes * 60_000 - Date.now();
+  if (state.deadline == null) return null;
+  return state.deadline - Date.now();
 }
 
 function stopTicker(): void {
@@ -102,6 +103,7 @@ function persist(): void {
     attemptToken: state.attemptToken,
     responses: state.responses,
     startedAt: state.startedAt,
+    deadline: state.deadline,
     report: state.phase === "result" ? state.report : null,
     autoSubmitted: state.autoSubmitted,
   };
@@ -193,8 +195,13 @@ function restoreProgress(): void {
     clearProgress();
     return;
   }
+  if (saved.phase !== "result" && state.exam.durationMinutes && typeof saved.deadline !== "number") {
+    clearProgress();
+    return;
+  }
   state.name = saved.name;
   state.attemptToken = saved.attemptToken;
+  state.deadline = typeof saved.deadline === "number" ? saved.deadline : null;
   state.responses = saved.responses || {};
   state.startedAt = saved.startedAt;
   state.report = saved.report;
@@ -255,13 +262,15 @@ async function beginAttempt(name: string): Promise<boolean> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  const body = (await response.json()) as { error?: string; token?: string; name?: string };
+  const body = (await response.json()) as { error?: string; token?: string; name?: string; deadline?: string | null };
   if (!response.ok || !body.token) {
     state.error = body.error || "无法开始考试。";
     return false;
   }
   state.attemptToken = body.token;
   state.name = body.name || name;
+  const deadline = body.deadline ? Date.parse(body.deadline) : NaN;
+  state.deadline = Number.isFinite(deadline) ? deadline : null;
   return true;
 }
 
@@ -403,6 +412,7 @@ function leaveExam(): void {
   state.attemptToken = "";
   state.responses = {};
   state.startedAt = null;
+  state.deadline = null;
   state.report = null;
   state.autoSubmitted = false;
   state.holdAuto = false;

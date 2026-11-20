@@ -11,6 +11,7 @@ export interface ProgressRecord {
   attemptToken: string;
   responses: Record<string, ResponseValue>;
   startedAt: number | null;
+  deadline: number | null;
   report: GradeReport | null;
   autoSubmitted: boolean;
 }
@@ -27,6 +28,7 @@ export function loadProgress(): ProgressRecord | null {
     const value = JSON.parse(raw) as ProgressRecord;
     if (value.version !== 2 || (value.phase !== "exam" && value.phase !== "result")) return null;
     if (typeof value.attemptToken !== "string" || value.attemptToken === "") return null;
+    value.deadline = typeof value.deadline === "number" ? value.deadline : null;
     return value;
   } catch {
     return null;
