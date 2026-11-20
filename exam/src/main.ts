@@ -1,54 +1,59 @@
 import { formatDuration, paperSummary } from "./display";
-import "./style.css";
-import { combineUploads, countAnswered, gradePaper } from "./grade";
-import { parseExamFile } from "./parse";
-import { renderExam, renderResult, renderSetup } from "./render";
-import { clearSession, loadSession, saveSession, type SessionRecord } from "./storage";
+import { countAnswered } from "./grade";
+import { renderCandidate, renderExam, renderGate, renderProctor, renderResult } from "./render";
+import { clearProgress, loadProgress, saveProgress, wipeLegacyStore, type ProgressRecord } from "./storage";
 import { answerTemplateText, questionTemplateText, templateXlsxBytes } from "./templates";
-import type { AnswerKey, FileContent, GradeReport, Paper, Question, ResponseValue } from "./types";
+import type { GradeReport, Paper, Question, ResponseValue } from "./types";
 
-const app = document.querySelector<HTMLElement>("#app");
+interface PublicExam {
+  ready: true;
+  updatedAt: string;
+  title: string;
+  durationMinutes: number | null;
+  questions: Paper["questions"];
+}
 
 interface State {
+  role: "gate" | "candidate" | "proctor";
   phase: "setup" | "exam" | "result";
-  paper: Paper | null;
-  key: AnswerKey | null;
-  questionContent: FileContent | null;
-  answerContent: FileContent | null;
+  exam: PublicExam | null;
   name: string;
+  passphrase: string;
+  questionFile: File | null;
+  answerFile: File | null;
   questionLabel: string;
   answerLabel: string;
   info: string;
   warning: string;
   error: string;
-  persistNote: string;
-  restored: boolean;
+  busy: boolean;
   responses: Record<string, ResponseValue>;
   startedAt: number | null;
   report: GradeReport | null;
   autoSubmitted: boolean;
 }
 
-let state: State = freshState();
+const app = () => document.querySelector<HTMLElement>("#app");
+let state: State = fresh();
 let timerId = 0;
-let saveTimer = 0;
 let submitting = false;
+let bootGen = 0;
 
-function freshState(): State {
+function fresh(): State {
   return {
+    role: "gate",
     phase: "setup",
-    paper: null,
-    key: null,
-    questionContent: null,
-    answerContent: null,
+    exam: null,
     name: "",
+    passphrase: "",
+    questionFile: null,
+    answerFile: null,
     questionLabel: "",
     answerLabel: "",
     info: "",
     warning: "",
     error: "",
-    persistNote: "答卷保存在本机浏览器。",
-    restored: false,
+    busy: false,
     responses: {},
     startedAt: null,
     report: null,
@@ -56,9 +61,19 @@ function freshState(): State {
   };
 }
 
+function paperOf(): Paper | null {
+  if (!state.exam) return null;
+  return {
+    title: state.exam.title,
+    durationMinutes: state.exam.durationMinutes,
+    questions: state.exam.questions,
+  };
+}
+
 function remainingMs(): number | null {
-  if (!state.paper?.durationMinutes || state.startedAt == null) return null;
-  return state.startedAt + state.paper.durationMinutes * 60_000 - Date.now();
+  const paper = paperOf();
+  if (!paper?.durationMinutes || state.startedAt == null) return null;
+  return state.startedAt + paper.durationMinutes * 60_000 - Date.now();
 }
 
 function stopTicker(): void {
@@ -66,25 +81,53 @@ function stopTicker(): void {
   timerId = 0;
 }
 
+function note(): string {
+  return "作答保存在这个标签页里，刷新不会丢。答案不在你的浏览器里。";
+}
+
+function persist(): void {
+  if (!state.exam || state.phase === "setup") {
+    clearProgress();
+    return;
+  }
+  const record: ProgressRecord = {
+    version: 2,
+    updatedAt: state.exam.updatedAt,
+    phase: state.phase,
+    name: state.name,
+    responses: state.responses,
+    startedAt: state.startedAt,
+    report: state.report,
+    autoSubmitted: state.autoSubmitted,
+  };
+  try {
+    saveProgress(record);
+  } catch {
+    state.error = "这个标签页无法保存作答，刷新后需要重做。";
+  }
+}
+
 function render(): void {
-  if (!app) return;
+  const root = app();
+  if (!root) return;
   stopTicker();
-  document.title = state.phase === "setup" || !state.paper ? "在线考试" : state.paper.title;
-  if (state.phase === "exam" && state.paper) {
-    app.innerHTML = renderExam({
-      paper: state.paper,
+  const paper = paperOf();
+  document.title = state.phase === "setup" || !paper ? "在线考试" : paper.title;
+  if (state.phase === "exam" && paper) {
+    root.innerHTML = renderExam({
+      paper,
       name: state.name,
       responses: state.responses,
       remainingMs: remainingMs(),
-      answered: countAnswered(state.paper.questions, state.responses),
+      answered: countAnswered(paper.questions, state.responses),
     });
     bindExam();
     startTicker();
     return;
   }
-  if (state.phase === "result" && state.paper && state.report) {
-    app.innerHTML = renderResult({
-      paper: state.paper,
+  if (state.phase === "result" && paper && state.report) {
+    root.innerHTML = renderResult({
+      paper,
       name: state.name,
       report: state.report,
       autoSubmitted: state.autoSubmitted,
@@ -93,23 +136,65 @@ function render(): void {
     return;
   }
   state.phase = "setup";
-  app.innerHTML = renderSetup({
-    name: state.name,
-    questionLabel: state.questionLabel,
-    answerLabel: state.answerLabel,
-    info: state.info,
-    warning: state.warning,
-    error: state.error,
-    persistNote: state.persistNote,
-    restored: state.restored,
-    canReset: Boolean(state.paper || state.key || state.questionLabel || state.answerLabel),
-  });
-  bindSetup();
+  if (state.role === "proctor") {
+    root.innerHTML = renderProctor({
+      passphrase: state.passphrase,
+      questionLabel: state.questionLabel,
+      answerLabel: state.answerLabel,
+      summary: state.exam ? paperSummary(paperOf() as Paper) : "",
+      info: state.info,
+      warning: state.warning,
+      error: state.error,
+      busy: state.busy,
+    });
+    bindProctor();
+    return;
+  }
+  if (state.role === "candidate") {
+    root.innerHTML = renderCandidate({
+      ready: Boolean(state.exam),
+      summary: state.exam ? paperSummary(paperOf() as Paper) : "",
+      name: state.name,
+      error: state.error,
+      note: note(),
+    });
+    bindCandidate();
+    return;
+  }
+  root.innerHTML = renderGate({ error: state.error });
+  bindGate();
 }
 
-function captureName(): void {
-  const input = document.getElementById("candidate-name");
-  if (input instanceof HTMLInputElement) state.name = input.value;
+function setRole(role: State["role"]): void {
+  state.role = role;
+  state.phase = "setup";
+  state.error = "";
+  state.info = "";
+  const hash = role === "gate" ? "" : `#${role}`;
+  if (location.hash !== hash) history.replaceState(null, "", `${location.pathname}${location.search}${hash}`);
+  render();
+}
+
+async function loadExam(): Promise<void> {
+  const response = await fetch("/api/exam", { cache: "no-store" });
+  if (!response.ok) throw new Error("无法读取试卷。");
+  const body = (await response.json()) as { ready?: boolean } & Partial<PublicExam>;
+  state.exam = body.ready ? (body as PublicExam) : null;
+}
+
+function restoreProgress(): void {
+  const saved = loadProgress();
+  if (!saved || !state.exam || saved.updatedAt !== state.exam.updatedAt) {
+    clearProgress();
+    return;
+  }
+  state.name = saved.name;
+  state.responses = saved.responses || {};
+  state.startedAt = saved.startedAt;
+  state.report = saved.report;
+  state.autoSubmitted = saved.autoSubmitted;
+  state.role = "candidate";
+  state.phase = saved.phase === "result" && saved.report ? "result" : "exam";
 }
 
 function qidSelector(id: string): string {
@@ -119,21 +204,18 @@ function qidSelector(id: string): string {
 function readResponse(question: Question, root: ParentNode): ResponseValue {
   const nodes = [...root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(qidSelector(question.id))];
   if (question.type === "single") {
-    const checked = nodes.find((node) => node instanceof HTMLInputElement && node.checked);
-    const index = checked ? Number(checked.value) : Number.NaN;
-    return { type: "single", index: Number.isInteger(index) ? index : null };
+    const picked = nodes.find((node) => node instanceof HTMLInputElement && node.checked);
+    return { type: "single", index: picked ? Number(picked.value) : null };
   }
   if (question.type === "multiple") {
-    const indices = nodes
-      .filter((node): node is HTMLInputElement => node instanceof HTMLInputElement && node.checked)
-      .map((node) => Number(node.value))
-      .filter((index) => Number.isInteger(index));
-    return { type: "multiple", indices };
+    return {
+      type: "multiple",
+      indices: nodes.filter((node) => node instanceof HTMLInputElement && node.checked).map((node) => Number(node.value)),
+    };
   }
   if (question.type === "judge") {
-    const checked = nodes.find((node) => node instanceof HTMLInputElement && node.checked);
-    if (!checked) return { type: "judge", value: null };
-    return { type: "judge", value: checked.value === "true" };
+    const picked = nodes.find((node) => node instanceof HTMLInputElement && node.checked);
+    return { type: "judge", value: picked ? picked.value === "true" : null };
   }
   if (question.type === "blank") {
     const inputs = nodes
@@ -141,115 +223,28 @@ function readResponse(question: Question, root: ParentNode): ResponseValue {
       .sort((left, right) => Number(left.dataset.blank) - Number(right.dataset.blank));
     return { type: "blank", values: inputs.map((node) => node.value) };
   }
-  const area = nodes.find((node) => node instanceof HTMLTextAreaElement);
+  const area = nodes.find((node): node is HTMLTextAreaElement => node instanceof HTMLTextAreaElement);
   return { type: "short", text: area?.value ?? "" };
 }
 
 function snapshotResponses(): void {
+  const paper = paperOf();
   const root = document.getElementById("exam-root");
-  if (!root || !state.paper) return;
-  for (const question of state.paper.questions) {
-    state.responses[question.id] = readResponse(question, root);
-  }
+  if (!paper || !root) return;
+  for (const question of paper.questions) state.responses[question.id] = readResponse(question, root);
 }
 
 function updateProgress(): void {
+  const paper = paperOf();
   const progress = document.getElementById("progress");
-  if (!progress || !state.paper) return;
-  const answered = countAnswered(state.paper.questions, state.responses);
-  progress.textContent = `已答 ${answered} / ${state.paper.questions.length}`;
-}
-
-async function persist(): Promise<void> {
-  if (!state.paper || !state.key) return;
-  const phase: SessionRecord["phase"] =
-    state.phase === "exam" || state.phase === "result" ? state.phase : "ready";
-  const record: SessionRecord = {
-    version: 1,
-    phase,
-    paper: state.paper,
-    key: state.key,
-    name: state.name.trim(),
-    responses: state.responses,
-    startedAt: state.startedAt,
-    report: state.report,
-    autoSubmitted: state.autoSubmitted,
-    warning: state.warning,
-    questionLabel: state.questionLabel,
-    answerLabel: state.answerLabel,
-  };
-  try {
-    await saveSession(record);
-  } catch {
-    state.persistNote = "本机无法保存试卷，刷新后需要重新上传。";
-    const note = document.getElementById("persist-note");
-    if (note) note.textContent = state.persistNote;
-  }
-}
-
-function schedulePersist(): void {
-  window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => {
-    void persist();
-  }, 200);
-}
-
-function syncCombined(): void {
-  const combined = combineUploads(state.questionContent, state.answerContent);
-  state.report = null;
-  state.startedAt = null;
-  state.responses = {};
-  if (combined.ok) {
-    state.paper = combined.paper;
-    state.key = combined.key;
-    state.error = "";
-    state.warning = combined.warning;
-    state.info = paperSummary(combined.paper);
-    void persist();
-    return;
-  }
-  state.paper = null;
-  state.key = null;
-  state.warning = "";
-  void clearSession().catch(() => {
-    state.persistNote = "本机无法保存试卷，刷新后需要重新上传。";
-  });
-  if (combined.pending) {
-    state.error = "";
-    state.info = [combined.paper ? paperSummary(combined.paper) : "", combined.error].filter(Boolean).join("");
-    return;
-  }
-  state.info = combined.paper ? paperSummary(combined.paper) : "";
-  state.error = combined.error;
-}
-
-async function onFile(slot: "question" | "answer", file: File): Promise<void> {
-  captureName();
-  const parsed = await parseExamFile(file);
-  const label = slot === "question" ? "题目文件" : "答案文件";
-  if (!parsed.ok) {
-    state.error = `${label}：${parsed.error}`;
-    render();
-    return;
-  }
-  if (slot === "question") {
-    state.questionContent = parsed.content;
-    state.questionLabel = file.name;
-  } else {
-    state.answerContent = parsed.content;
-    state.answerLabel = file.name;
-  }
-  state.error = "";
-  state.restored = false;
-  syncCombined();
-  render();
+  if (!paper || !progress) return;
+  progress.textContent = `已答 ${countAnswered(paper.questions, state.responses)} / ${paper.questions.length}`;
 }
 
 function startExam(name: string): void {
-  state.name = name;
   const trimmed = name.trim();
-  if (!state.paper || !state.key) {
-    state.error = state.info || "请先上传题目和答案。";
+  if (!state.exam) {
+    state.error = "考试还没开始。";
     render();
     return;
   }
@@ -265,7 +260,7 @@ function startExam(name: string): void {
   state.report = null;
   state.autoSubmitted = false;
   state.error = "";
-  void persist();
+  persist();
   render();
   window.scrollTo(0, 0);
 }
@@ -291,27 +286,42 @@ function startTicker(): void {
 }
 
 async function submit(auto: boolean, confirmed = false): Promise<void> {
-  if (submitting || state.phase !== "exam" || !state.paper || !state.key) return;
+  const paper = paperOf();
+  if (submitting || state.phase !== "exam" || !paper) return;
   snapshotResponses();
-  const left = state.paper.questions.length - countAnswered(state.paper.questions, state.responses);
+  const left = paper.questions.length - countAnswered(paper.questions, state.responses);
   const confirmBox = document.getElementById("confirm-unanswered");
   if (!auto && !confirmed && left > 0) {
     const text = document.getElementById("confirm-text");
     if (text) text.textContent = `还有 ${left} 题未作答，确定交卷吗？`;
     confirmBox?.removeAttribute("hidden");
-    confirmBox?.scrollIntoView({ block: "nearest" });
     return;
   }
   confirmBox?.setAttribute("hidden", "");
   submitting = true;
   stopTicker();
-  state.report = gradePaper(state.paper, state.key, state.responses);
-  state.autoSubmitted = auto;
-  state.phase = "result";
   try {
-    await persist();
+    const response = await fetch("/api/grade", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: state.name, responses: state.responses }),
+    });
+    const body = (await response.json()) as { error?: string; report?: GradeReport };
+    if (!response.ok || !body.report) {
+      state.error = body.error || "交卷失败，请再试一次。";
+      state.phase = "exam";
+      submitting = false;
+      render();
+      return;
+    }
+    state.report = body.report;
+    state.autoSubmitted = auto;
+    state.phase = "result";
+    state.error = "";
+    persist();
   } catch {
-    state.persistNote = "本机无法保存试卷，刷新后需要重新上传。";
+    state.error = "交卷失败，请再试一次。";
+    state.phase = "exam";
   }
   submitting = false;
   render();
@@ -319,28 +329,26 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
 }
 
 function retry(): void {
-  if (!state.paper || !state.key) return;
+  if (!state.exam) return;
   state.phase = "exam";
   state.responses = {};
   state.startedAt = Date.now();
   state.report = null;
   state.autoSubmitted = false;
-  void persist();
+  persist();
   render();
   window.scrollTo(0, 0);
 }
 
-async function resetAll(): Promise<void> {
+function leaveExam(): void {
   stopTicker();
-  window.clearTimeout(saveTimer);
-  const note = state.persistNote;
-  state = freshState();
-  if (note.includes("无法保存")) state.persistNote = note;
-  try {
-    await clearSession();
-  } catch {
-    state.persistNote = "本机无法保存试卷，刷新后需要重新上传。";
-  }
+  clearProgress();
+  state.phase = "setup";
+  state.responses = {};
+  state.startedAt = null;
+  state.report = null;
+  state.autoSubmitted = false;
+  state.role = "candidate";
   render();
   window.scrollTo(0, 0);
 }
@@ -356,28 +364,94 @@ function download(filename: string, blob: Blob): void {
   URL.revokeObjectURL(url);
 }
 
-function bindSetup(): void {
-  const form = document.getElementById("setup-form");
-  form?.addEventListener("submit", (event) => {
+function bindGate(): void {
+  document.getElementById("role-candidate")?.addEventListener("click", () => setRole("candidate"));
+  document.getElementById("role-proctor")?.addEventListener("click", () => setRole("proctor"));
+}
+
+function bindCandidate(): void {
+  document.getElementById("candidate-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const input = document.getElementById("candidate-name");
     startExam(input instanceof HTMLInputElement ? input.value : state.name);
   });
+  document.getElementById("candidate-name")?.addEventListener("input", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement) state.name = input.value;
+  });
+  document.getElementById("refresh-exam")?.addEventListener("click", () => {
+    void loadExam()
+      .then(() => render())
+      .catch(() => {
+        state.error = "无法读取试卷。";
+        render();
+      });
+  });
+  document.getElementById("back-gate")?.addEventListener("click", () => setRole("gate"));
+}
+
+async function publish(): Promise<void> {
+  const input = document.getElementById("proctor-pass");
+  const passphrase = input instanceof HTMLInputElement ? input.value : state.passphrase;
+  state.passphrase = passphrase;
+  if (!passphrase) {
+    state.error = "请填写监考口令。";
+    render();
+    return;
+  }
+  state.busy = true;
+  state.error = "";
+  render();
+  const data = new FormData();
+  data.set("passphrase", passphrase);
+  if (state.questionFile) data.set("question", state.questionFile);
+  if (state.answerFile) data.set("answer", state.answerFile);
+  try {
+    const response = await fetch("/api/proctor", { method: "POST", body: data });
+    const body = (await response.json()) as { error?: string; summary?: string; warning?: string };
+    if (!response.ok) {
+      state.error = body.error || "发布失败。";
+      state.busy = false;
+      render();
+      return;
+    }
+    await loadExam();
+    state.info = body.summary || "试卷已发布。";
+    state.warning = body.warning || "";
+    state.questionFile = null;
+    state.answerFile = null;
+    state.questionLabel = "";
+    state.answerLabel = "";
+    state.error = "";
+  } catch {
+    state.error = "发布失败，请再试一次。";
+  }
+  state.busy = false;
+  render();
+}
+
+function bindProctor(): void {
+  document.getElementById("proctor-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void publish();
+  });
+  document.getElementById("proctor-pass")?.addEventListener("input", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement) state.passphrase = input.value;
+  });
   document.getElementById("question-file")?.addEventListener("change", (event) => {
     const input = event.target;
     const file = input instanceof HTMLInputElement ? input.files?.[0] : undefined;
-    if (file) void onFile("question", file);
+    state.questionFile = file ?? null;
+    state.questionLabel = file?.name ?? "";
+    render();
   });
   document.getElementById("answer-file")?.addEventListener("change", (event) => {
     const input = event.target;
     const file = input instanceof HTMLInputElement ? input.files?.[0] : undefined;
-    if (file) void onFile("answer", file);
-  });
-  document.getElementById("candidate-name")?.addEventListener("input", (event) => {
-    const input = event.target;
-    if (!(input instanceof HTMLInputElement)) return;
-    state.name = input.value;
-    if (state.paper && state.key) schedulePersist();
+    state.answerFile = file ?? null;
+    state.answerLabel = file?.name ?? "";
+    render();
   });
   document.getElementById("tpl-q-json")?.addEventListener("click", () => {
     download("题目模板.json", new Blob([questionTemplateText()], { type: "application/json;charset=utf-8" }));
@@ -389,37 +463,31 @@ function bindSetup(): void {
     const bytes = templateXlsxBytes();
     const copy = new Uint8Array(bytes.byteLength);
     copy.set(bytes);
-    download(
-      "考试模板.xlsx",
-      new Blob([copy], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-    );
+    download("考试模板.xlsx", new Blob([copy], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   });
-  document.getElementById("reset")?.addEventListener("click", () => {
-    void resetAll();
-  });
+  document.getElementById("back-gate")?.addEventListener("click", () => setRole("gate"));
 }
 
 function bindExam(): void {
   const root = document.getElementById("exam-root");
   const onEdit = (event: Event) => {
     const target = event.target;
-    if (!(target instanceof HTMLElement) || !root || !state.paper) return;
+    const paper = paperOf();
+    if (!(target instanceof HTMLElement) || !root || !paper) return;
     const qid = target.getAttribute("data-qid");
     if (!qid) return;
-    const question = state.paper.questions.find((item) => item.id === qid);
+    const question = paper.questions.find((item) => item.id === qid);
     if (!question) return;
     state.responses[qid] = readResponse(question, root);
     updateProgress();
-    schedulePersist();
+    persist();
   };
   root?.addEventListener("change", onEdit);
   root?.addEventListener("input", onEdit);
   document.getElementById("submit-btn")?.addEventListener("click", () => {
     void submit(false);
   });
-  document.getElementById("reset")?.addEventListener("click", () => {
-    void resetAll();
-  });
+  document.getElementById("reset")?.addEventListener("click", () => leaveExam());
   document.getElementById("confirm-submit")?.addEventListener("click", () => {
     void submit(false, true);
   });
@@ -430,47 +498,44 @@ function bindExam(): void {
 
 function bindResult(): void {
   document.getElementById("retry")?.addEventListener("click", () => retry());
-  document.getElementById("reset")?.addEventListener("click", () => {
-    void resetAll();
-  });
+  document.getElementById("reset")?.addEventListener("click", () => leaveExam());
 }
 
-function applySaved(saved: SessionRecord): void {
-  state.paper = saved.paper;
-  state.key = saved.key;
-  state.questionContent = { paper: saved.paper, key: null };
-  state.answerContent = { paper: null, key: saved.key };
-  state.name = saved.name || "";
-  state.responses = saved.responses || {};
-  state.startedAt = saved.startedAt;
-  state.report = saved.report;
-  state.autoSubmitted = Boolean(saved.autoSubmitted);
-  state.warning = saved.warning || "";
-  state.questionLabel = saved.questionLabel || "已保存的题目";
-  state.answerLabel = saved.answerLabel || "已保存的答案";
-  state.info = paperSummary(saved.paper);
-  state.restored = true;
-  state.phase = saved.phase === "exam" || saved.phase === "result" ? saved.phase : "setup";
-  if (state.phase === "result" && !state.report) {
-    state.report = gradePaper(saved.paper, saved.key, state.responses);
-  }
-  if (state.phase === "result" && !state.report) state.phase = "setup";
+function roleFromHash(): State["role"] {
+  if (location.hash === "#proctor") return "proctor";
+  if (location.hash === "#candidate") return "candidate";
+  return "gate";
 }
 
-async function init(): Promise<void> {
-  try {
-    const saved = await loadSession();
-    if (saved) applySaved(saved);
-  } catch {
-    state.persistNote = "本机无法保存试卷，刷新后需要重新上传。";
-  }
-  if (state.phase === "exam" && (remainingMs() ?? 1) <= 0) {
-    state.report = state.paper && state.key ? gradePaper(state.paper, state.key, state.responses) : null;
-    state.autoSubmitted = true;
-    state.phase = state.report ? "result" : "setup";
-    await persist();
-  }
-  render();
-}
+let listening = false;
 
-void init();
+export function boot(): void {
+  const gen = ++bootGen;
+  wipeLegacyStore();
+  state = fresh();
+  state.role = roleFromHash();
+  if (!listening) {
+    listening = true;
+    window.addEventListener("hashchange", () => {
+      if (state.phase !== "setup") return;
+      state.role = roleFromHash();
+      state.error = "";
+      render();
+    });
+  }
+  void (async () => {
+    try {
+      await loadExam();
+    } catch {
+      if (gen !== bootGen) return;
+      state.error = "无法读取试卷。";
+    }
+    if (gen !== bootGen) return;
+    if (roleFromHash() !== "proctor") restoreProgress();
+    if (state.phase === "exam" && (remainingMs() ?? 1) <= 0) {
+      await submit(true, true);
+      return;
+    }
+    render();
+  })();
+}

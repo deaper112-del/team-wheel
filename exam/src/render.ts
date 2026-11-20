@@ -22,16 +22,27 @@ export interface ExamView {
   answered: number;
 }
 
-export interface SetupView {
+export interface GateView {
+  error: string;
+}
+
+export interface CandidateView {
+  ready: boolean;
+  summary: string;
   name: string;
+  error: string;
+  note: string;
+}
+
+export interface ProctorView {
+  passphrase: string;
   questionLabel: string;
   answerLabel: string;
+  summary: string;
   info: string;
   warning: string;
   error: string;
-  persistNote: string;
-  restored: boolean;
-  canReset: boolean;
+  busy: boolean;
 }
 
 export interface ResultView {
@@ -56,20 +67,68 @@ function banner(kind: "bad" | "warn" | "info", text: string, role?: string): str
   return `<p class="banner ${kind}"${alert}>${esc(text)}</p>`;
 }
 
-export function renderSetup(view: SetupView): string {
-  return `<div class="wrap">
-    <header class="mast">
+function mast(eyebrow: string, title: string): string {
+  return `<header class="mast">
       <div class="brand">
         <span class="seal" aria-hidden="true">考</span>
         <div>
-          <p class="eyebrow">本机评分 · 无需登录</p>
-          <h1>在线考试</h1>
+          <p class="eyebrow">${esc(eyebrow)}</p>
+          <h1>${esc(title)}</h1>
         </div>
       </div>
-    </header>
-    <form id="setup-form" class="card">
-      <p class="lede">上传题目和答案后开始。试卷保存在这台设备上，刷新不会丢失。交卷前页面上看不到答案。</p>
-      ${view.restored ? banner("info", "已恢复上次保存在本机的试卷，可以直接开始，也可以重新选择文件。") : ""}
+    </header>`;
+}
+
+export function renderGate(view: GateView): string {
+  return `<div class="wrap">
+    ${mast("同一链接", "在线考试")}
+    <section class="card">
+      <p class="lede">监考发布一次题目和答案。考生只填写姓名，然后作答。交卷前看不到答案。</p>
+      ${banner("bad", view.error, "alert")}
+      <div class="row-actions">
+        <button type="button" class="primary" id="role-candidate">我是考生</button>
+        <button type="button" class="ghost" id="role-proctor">我是监考</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+export function renderCandidate(view: CandidateView): string {
+  const ready = view.ready
+    ? `<p class="summary">${esc(view.summary)}</p>
+      <label class="name-field" for="candidate-name">考生姓名
+        <input id="candidate-name" name="candidate" maxlength="30" autocomplete="name" placeholder="请输入姓名" value="${esc(view.name)}">
+      </label>
+      <div class="row-actions">
+        <button type="submit" class="primary">开始考试</button>
+      </div>`
+    : `<p class="lede">考试还没开始。</p>
+      <p class="fine">监考发布试卷之后，刷新这个页面即可。</p>
+      <div class="row-actions">
+        <button type="button" class="primary" id="refresh-exam">再看看</button>
+      </div>`;
+  return `<div class="wrap">
+    ${mast("考生", "在线考试")}
+    <form id="candidate-form" class="card">
+      ${ready}
+      ${banner("bad", view.error, "alert")}
+      <p class="fine">${esc(view.note)}</p>
+      <div class="row-actions">
+        <button type="button" class="ghost" id="back-gate">返回</button>
+      </div>
+    </form>
+  </div>`;
+}
+
+export function renderProctor(view: ProctorView): string {
+  return `<div class="wrap">
+    ${mast("监考", "发布试卷")}
+    <form id="proctor-form" class="card">
+      <p class="lede">上传题目和答案后，所有考生打开同一链接、填写姓名即可开始。更换文件会替换当前试卷。</p>
+      ${view.summary ? `<p class="summary">${esc(view.summary)}</p>` : `<p class="fine">还没有发布试卷。</p>`}
+      <label class="name-field" for="proctor-pass">监考口令
+        <input id="proctor-pass" type="password" autocomplete="current-password" placeholder="请输入口令" value="${esc(view.passphrase)}">
+      </label>
       <div class="uploads">
         <label class="file">
           <span class="file-kicker">题目文件</span>
@@ -99,16 +158,12 @@ export function renderSetup(view: SetupView): string {
           <p>PDF 分成题目卷和答案卷上传。大题标题写成「一、选择题」「二、多选题」「三、判断题」「四、填空题」「五、简答题」。选择题在标题里写「每题 N 分」，选项单独成行，如 A. B.。填空在标题里写「每空 N 分」，空用下划线留出。简答在题干末尾写（N分）。答案卷用同一题号：选择题写「1. B」，多选写「1. A、C」，判断写「1. 对」，填空直接写答案，需要时加「可接受：」。简答写「参考要点」，按其中的关键词比例给分，交卷后会显示参考要点。建议用时不会自动交卷，只有写明「限时 N 分钟」才倒计时。</p>
         </div>
       </details>
-      <label class="name-field" for="candidate-name">考生姓名
-        <input id="candidate-name" name="candidate" maxlength="30" autocomplete="name" placeholder="请输入姓名" value="${esc(view.name)}">
-      </label>
       ${banner("info", view.info)}
       ${banner("warn", view.warning)}
       ${banner("bad", view.error, "alert")}
-      <p id="persist-note" class="fine">${esc(view.persistNote)}</p>
       <div class="row-actions">
-        <button type="submit" class="primary">开始考试</button>
-        ${view.canReset ? `<button type="button" class="ghost" id="reset">重新上传</button>` : ""}
+        <button type="submit" class="primary" id="publish"${view.busy ? " disabled" : ""}>发布试卷</button>
+        <button type="button" class="ghost" id="back-gate">返回</button>
       </div>
     </form>
   </div>`;
@@ -227,7 +282,7 @@ export function renderExam(view: ExamView): string {
       <div class="exam-bar">
         <span>考生 ${esc(view.name)}</span>
         <span id="progress">已答 ${view.answered} / ${view.paper.questions.length}</span>
-        <button type="button" class="text-btn" id="reset">重新上传</button>
+        <button type="button" class="text-btn" id="reset">返回首页</button>
       </div>
       ${body}
       <div class="sticky-submit">
@@ -302,7 +357,7 @@ export function renderResult(view: ResultView): string {
       ${items}
       <div class="row-actions">
         <button type="button" class="primary" id="retry">再考一次</button>
-        <button type="button" class="ghost" id="reset">重新上传</button>
+        <button type="button" class="ghost" id="reset">返回首页</button>
       </div>
     </section>
   </div>`;

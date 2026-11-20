@@ -1,9 +1,6 @@
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import workerSrc from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { ParseOutcome } from "./parse";
 import { isAnswerDocument, linesFromItems, parseExamLines, type PdfTextItem } from "./pdfPaper";
-
-if (typeof window !== "undefined") GlobalWorkerOptions.workerSrc = workerSrc;
 
 interface PdfTextRun {
   str: string;

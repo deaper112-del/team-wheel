@@ -100,7 +100,7 @@ h2 {
 
 .card + .card { margin-top: 14px; }
 
-.lede { margin: 0 0 16px; }
+.lede, .summary { margin: 0 0 16px; }
 
 .uploads {
   display: grid;

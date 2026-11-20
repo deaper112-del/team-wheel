@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderExam, renderResult, renderSetup } from "./render";
+import { renderCandidate, renderExam, renderProctor, renderResult } from "./render";
 import { gradePaper } from "./grade";
 import { parseJsonText } from "./parse";
 import type { Paper } from "./types";
@@ -44,27 +44,44 @@ describe("renderExam", () => {
     expect(html).toContain("60:00");
   });
 
-  it("starts empty, with two uploads and blank templates", () => {
-    const html = renderSetup({
+  it("lets a candidate enter only a name, and keeps uploads on the proctor page", () => {
+    const waiting = renderCandidate({
+      ready: false,
+      summary: "",
       name: "",
+      error: "",
+      note: "答案不在你的浏览器里。",
+    });
+    expect(waiting).toContain("考试还没开始");
+    expect(waiting).not.toContain("题目文件");
+    expect(waiting).not.toContain("type=\"file\"");
+
+    const ready = renderCandidate({
+      ready: true,
+      summary: "《综合测验》共 1 题：单选题 1。不限时。",
+      name: "",
+      error: "",
+      note: "答案不在你的浏览器里。",
+    });
+    expect(ready).toContain("考生姓名");
+    expect(ready).toContain("开始考试");
+    expect(ready).not.toContain("type=\"file\"");
+
+    const proctor = renderProctor({
+      passphrase: "",
       questionLabel: "",
       answerLabel: "",
+      summary: "",
       info: "",
       warning: "",
       error: "",
-      persistNote: "答卷保存在本机浏览器。",
-      restored: false,
-      canReset: false,
+      busy: false,
     });
-    expect(html).toContain("题目文件");
-    expect(html).toContain("答案文件");
-    expect(html).toContain("题目 JSON");
-    expect(html).toContain("答案 JSON");
-    expect(html).toContain("Excel");
-    expect(html).toContain("PDF");
-    expect(html).toContain("文件格式说明");
-    expect(html).not.toContain("单选题");
-    expect(html).not.toContain("type=\"radio\"");
+    expect(proctor).toContain("题目文件");
+    expect(proctor).toContain("答案文件");
+    expect(proctor).toContain("监考口令");
+    expect(proctor).toContain("PDF");
+    expect(proctor).not.toContain("type=\"radio\"");
   });
 });
 
@@ -93,6 +110,6 @@ describe("renderResult", () => {
     expect(html).toContain("参考答案");
     expect(html).toContain("关键词1");
     expect(html).toContain("再考一次");
-    expect(html).toContain("重新上传");
+    expect(html).toContain("返回首页");
   });
 });

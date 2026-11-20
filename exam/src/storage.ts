@@ -1,78 +1,40 @@
-import type { AnswerKey, GradeReport, Paper, ResponseValue } from "./types";
+import type { GradeReport, ResponseValue } from "./types";
 
-const DB_NAME = "online-exam";
-const STORE = "session";
-const KEY = "current";
+const LEGACY_DB = "online-exam";
+const PROGRESS_KEY = "exam-progress-v2";
 
-export interface SessionRecord {
-  version: 1;
-  phase: "ready" | "exam" | "result";
-  paper: Paper;
-  key: AnswerKey;
+export interface ProgressRecord {
+  version: 2;
+  updatedAt: string;
+  phase: "exam" | "result";
   name: string;
   responses: Record<string, ResponseValue>;
   startedAt: number | null;
   report: GradeReport | null;
   autoSubmitted: boolean;
-  warning: string;
-  questionLabel: string;
-  answerLabel: string;
 }
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("无法打开本地数据库"));
-  });
+export function wipeLegacyStore(): void {
+  if (typeof indexedDB === "undefined") return;
+  indexedDB.deleteDatabase(LEGACY_DB);
 }
 
-function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return openDb().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        let settled = false;
-        let value = undefined as T;
-        const fail = (error: unknown) => {
-          if (settled) return;
-          settled = true;
-          db.close();
-          reject(error instanceof Error ? error : new Error("本地数据库读写失败"));
-        };
-        const tx = db.transaction(STORE, mode);
-        const request = run(tx.objectStore(STORE));
-        request.onsuccess = () => {
-          value = request.result;
-        };
-        request.onerror = () => fail(request.error ?? new Error("本地数据库读写失败"));
-        tx.oncomplete = () => {
-          if (settled) return;
-          settled = true;
-          db.close();
-          resolve(value);
-        };
-        tx.onerror = () => fail(tx.error ?? new Error("本地数据库读写失败"));
-        tx.onabort = () => fail(tx.error ?? new Error("本地数据库读写失败"));
-      }),
-  );
-}
-
-export function loadSession(): Promise<SessionRecord | null> {
-  return withStore<SessionRecord | undefined>("readonly", (store) => store.get(KEY)).then((value) => {
-    if (!value || value.version !== 1 || !value.paper || !value.key) return null;
+export function loadProgress(): ProgressRecord | null {
+  try {
+    const raw = sessionStorage.getItem(PROGRESS_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as ProgressRecord;
+    if (value.version !== 2 || (value.phase !== "exam" && value.phase !== "result")) return null;
     return value;
-  });
+  } catch {
+    return null;
+  }
 }
 
-export function saveSession(record: SessionRecord): Promise<void> {
-  const copy = structuredClone(record);
-  return withStore("readwrite", (store) => store.put(copy, KEY)).then(() => undefined);
+export function saveProgress(record: ProgressRecord): void {
+  sessionStorage.setItem(PROGRESS_KEY, JSON.stringify(record));
 }
 
-export function clearSession(): Promise<void> {
-  return withStore("readwrite", (store) => store.delete(KEY)).then(() => undefined);
+export function clearProgress(): void {
+  sessionStorage.removeItem(PROGRESS_KEY);
 }

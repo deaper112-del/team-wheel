@@ -4,17 +4,25 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "dev": "next dev --hostname 127.0.0.1 --port 5173",
+    "build": "next build && node scripts/migrate.mjs",
+    "start": "next start --hostname 127.0.0.1 --port 5173",
     "test": "vitest run"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.17",
+    "next": "^15.5.29",
     "pdfjs-dist": "^4.10.38",
+    "pg": "^8.23.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "xlsx": "0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.3",
     "vitest": "^3.0.5"
