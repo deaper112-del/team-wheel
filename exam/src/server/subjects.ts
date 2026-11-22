@@ -85,7 +85,10 @@ async function rememberLive(): Promise<void> {
   }>("select title, duration_minutes, questions, answer_key, updated_at from exam_paper where id = 1");
   const live = rows[0];
   if (!live) return;
-  const existing = await sql<{ id: number }>("select id from exam_round where paper_updated_at = $1", [live.updated_at]);
+  const existing = await sql<{ id: number }>(
+    `select r.id from exam_round r
+     join exam_paper p on p.id = 1 and r.paper_updated_at = p.updated_at`,
+  );
   if (existing[0]) return;
   const questions = publicQuestions(asJson(live.questions));
   const paper: Paper = { title: live.title, durationMinutes: live.duration_minutes, questions };
@@ -98,12 +101,7 @@ async function rememberLive(): Promise<void> {
     [subjectId, paper.title, paper.durationMinutes, JSON.stringify(questions), JSON.stringify(asJson(live.answer_key)), hash, live.updated_at],
   );
   const paperId = num(saved[0].id);
-  await sql(
-    `insert into exam_round (subject_id, paper_id, paper_updated_at, started_at)
-     values ($1, $2, $3, $3)
-     on conflict (paper_updated_at) do nothing`,
-    [subjectId, paperId, live.updated_at],
-  );
+  await addRound(subjectId, paperId);
 }
 
 async function subjectForHash(hash: string, name: string): Promise<number> {
@@ -116,12 +114,41 @@ async function subjectForHash(hash: string, name: string): Promise<number> {
   return num(created[0].id);
 }
 
-async function addRound(subjectId: number, paperId: number, updatedAt: Date | string): Promise<void> {
+async function addRound(subjectId: number, paperId: number): Promise<void> {
   await sql(
     `insert into exam_round (subject_id, paper_id, paper_updated_at, started_at)
-     values ($1, $2, $3, $3)
+     select $1, $2, updated_at, updated_at from exam_paper where id = 1
      on conflict (paper_updated_at) do nothing`,
-    [subjectId, paperId, updatedAt],
+    [subjectId, paperId],
+  );
+}
+
+async function alignRoundStamps(): Promise<void> {
+  await sql(
+    `delete from exam_round r
+     where exists (
+       select 1 from exam_round other
+       where other.id < r.id
+         and abs(extract(epoch from (other.paper_updated_at - r.paper_updated_at))) < 0.0015
+     )`,
+  );
+  await sql(
+    `update exam_round r
+     set paper_updated_at = picked.paper_updated_at
+     from (
+       select r2.id,
+              (
+                select a.paper_updated_at
+                from exam_attempt a
+                where abs(extract(epoch from (a.paper_updated_at - r2.paper_updated_at))) < 0.0015
+                order by abs(extract(epoch from (a.paper_updated_at - r2.paper_updated_at)))
+                limit 1
+              ) as paper_updated_at
+       from exam_round r2
+     ) picked
+     where r.id = picked.id
+       and picked.paper_updated_at is not null
+       and r.paper_updated_at is distinct from picked.paper_updated_at`,
   );
 }
 
@@ -138,8 +165,8 @@ export async function publishUploaded(paper: Paper, key: AnswerKey): Promise<{ s
     [subjectId, stored.title, stored.durationMinutes, JSON.stringify(questions), JSON.stringify(key), hash],
   );
   const paperId = num(saved[0].id);
-  const updatedAt = await saveExam(stored, key);
-  await addRound(subjectId, paperId, updatedAt);
+  await saveExam(stored, key);
+  await addRound(subjectId, paperId);
   const named = await sql<{ name: string }>("select name from exam_subject where id = $1", [subjectId]);
   return { subjectId, paperId, subjectName: named[0]?.name ?? subjectNameFromTitle(paper.title) };
 }
@@ -160,9 +187,9 @@ export async function startSavedPaper(paperId: number): Promise<{ paper: Paper; 
     durationMinutes: row.duration_minutes,
     questions: publicQuestions(asJson(row.questions)),
   };
-  const updatedAt = await saveExam(paper, asJson(row.answer_key));
+  await saveExam(paper, asJson(row.answer_key));
   const subjectId = num(row.subject_id);
-  await addRound(subjectId, paperId, updatedAt);
+  await addRound(subjectId, paperId);
   return { paper, subjectId };
 }
 
@@ -238,27 +265,33 @@ export async function subjectBoard(preferId: number | null): Promise<SubjectBoar
 }
 
 export async function subjectChart(subjectId: number): Promise<LearningChart | null> {
+  await alignRoundStamps();
   const named = await sql<{ name: string }>("select name from exam_subject where id = $1", [subjectId]);
   if (!named[0]) return null;
-  const rounds = await sql<{ paper_updated_at: Date | string; started_at: Date | string; title: string }>(
-    `select r.paper_updated_at, r.started_at, p.title
+  const rows = await sql<{ round_id: number | string; started_at: Date | string; title: string; report: unknown }>(
+    `select r.id as round_id, r.started_at, p.title, a.report
      from exam_round r
      join exam_saved_paper p on p.id = r.paper_id
+     left join exam_attempt a
+       on a.paper_updated_at = r.paper_updated_at
+      and a.submitted_at is not null
+      and a.report is not null
      where r.subject_id = $1
      order by r.started_at, r.id`,
     [subjectId],
   );
+  const grouped = new Map<number, { at: string; title: string; reports: GradeReport[] }>();
+  for (const row of rows) {
+    const id = num(row.round_id);
+    const current = grouped.get(id) ?? { at: stamp(row.started_at), title: row.title, reports: [] };
+    if (row.report != null) current.reports.push(asJson<GradeReport>(row.report));
+    grouped.set(id, current);
+  }
   const points: LearningPoint[] = [];
-  for (const round of rounds) {
-    const attempts = await sql<{ report: unknown }>(
-      `select report from exam_attempt
-       where paper_updated_at = $1 and submitted_at is not null and report is not null`,
-      [round.paper_updated_at],
-    );
+  for (const round of grouped.values()) {
     let correct = 0;
     let total = 0;
-    for (const attempt of attempts) {
-      const report = asJson<GradeReport>(attempt.report);
+    for (const report of round.reports) {
       if (!report || !Array.isArray(report.items)) continue;
       for (const item of report.items) {
         if (item.status === "ungraded") continue;
@@ -268,7 +301,7 @@ export async function subjectChart(subjectId: number): Promise<LearningChart | n
     }
     points.push({
       round: points.length + 1,
-      at: stamp(round.started_at),
+      at: round.at,
       paperTitle: round.title,
       rate: total > 0 ? correct / total : null,
       correct,

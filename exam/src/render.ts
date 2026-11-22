@@ -362,33 +362,26 @@ function learningSvg(points: LearningPoint[]): string {
         <text x="0" y="${y + 4}" font-size="11" fill="#5d6b66">${Math.round(rate * 100)}%</text>`;
     })
     .join("");
-  const chunks: string[][] = [];
-  let current: string[] = [];
+  const scored: string[] = [];
   const dots: string[] = [];
   points.forEach((point, index) => {
     const x = xAt(index);
     if (point.rate == null) {
-      if (current.length > 0) chunks.push(current);
-      current = [];
       dots.push(`<text x="${x}" y="${height - 14}" text-anchor="middle" font-size="11" fill="#5d6b66">第${point.round}场</text>`);
       return;
     }
     const y = yAt(point.rate);
-    current.push(`${x},${y}`);
+    scored.push(`${x},${y}`);
     dots.push(
       `<circle cx="${x}" cy="${y}" r="4.5" fill="#0c5c56"/>
        <text x="${x}" y="${y - 8}" text-anchor="middle" font-size="11" fill="#084843">${Math.round(point.rate * 100)}%</text>
        <text x="${x}" y="${height - 14}" text-anchor="middle" font-size="11" fill="#5d6b66">第${point.round}场</text>`,
     );
   });
-  if (current.length > 0) chunks.push(current);
-  const lines = chunks
-    .filter((chunk) => chunk.length >= 2)
-    .map(
-      (chunk) =>
-        `<polyline points="${chunk.join(" ")}" fill="none" stroke="#0c5c56" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`,
-    )
-    .join("");
+  const lines =
+    scored.length >= 2
+      ? `<polyline points="${scored.join(" ")}" fill="none" stroke="#0c5c56" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
+      : "";
   return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="学习力曲线">
     ${grids}
     ${lines}

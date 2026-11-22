@@ -5,6 +5,7 @@ import { POST as start } from "../../app/api/proctor/subjects/start/route";
 import type { AnswerKey, Paper } from "../types";
 import { sql } from "./db";
 import { getPublicExam } from "./paper";
+import { renderProctor } from "../render";
 import { groupPapers, publishUploaded, subjectBoard, subjectChart } from "./subjects";
 
 const questions = [{ id: "1", type: "single" as const, stem: "甲题", options: ["甲", "乙"], score: 1, blanks: 0 }];
@@ -99,5 +100,58 @@ describe("subjects", () => {
     } finally {
       delete process.env.PROCTOR_PASSPHRASE;
     }
+  });
+
+  it("plots three rounds of one subject after the round clock was rounded", async () => {
+    const paper: Paper = {
+      title: "测试",
+      durationMinutes: null,
+      questions: [{ id: "1", type: "single", stem: "测试题", options: ["甲", "乙"], score: 1, blanks: 0 }],
+    };
+    const saved = [];
+    for (let index = 0; index < 3; index += 1) {
+      await sql("select pg_sleep(0.02)");
+      const published = await publishUploaded(paper, keyA);
+      saved.push(published);
+      await sql(
+        `insert into exam_attempt (token, name, paper_updated_at, submitted_at, report)
+         select $1, '考生', updated_at, now(), $2::jsonb from exam_paper where id = 1`,
+        [`d${index}`.padEnd(64, "d"), JSON.stringify(report(index === 1 ? "incorrect" : "correct"))],
+      );
+      await sql("update exam_round set paper_updated_at = paper_updated_at - interval '400 microseconds' where paper_id = $1", [
+        published.paperId,
+      ]);
+    }
+    const chart = await subjectChart(saved[0].subjectId);
+    expect(chart?.name).toBe("测试");
+    expect(chart?.points).toHaveLength(3);
+    expect(chart?.points.map((point) => point.rate)).toEqual([1, 0, 1]);
+    const html = renderProctor({
+      passphrase: "",
+      questionLabel: "",
+      answerLabel: "",
+      summary: "",
+      info: "",
+      warning: "",
+      error: "",
+      busy: false,
+      results: null,
+      resultsNote: "",
+      subjects: [{ id: saved[0].subjectId, name: "测试", papers: [] }],
+      subjectId: saved[0].subjectId,
+      paperId: null,
+      chart,
+      groupIds: [],
+      groupTarget: "",
+      groupName: "",
+      groupOpen: false,
+      subjectNote: "",
+      subjectError: "",
+    });
+    expect(html).toContain("<polyline");
+    expect(html).toContain("第1场");
+    expect(html).toContain("第2场");
+    expect(html).toContain("第3场");
+    expect(html).not.toContain("科目暗号");
   });
 });
