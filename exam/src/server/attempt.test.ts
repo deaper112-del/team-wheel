@@ -80,14 +80,18 @@ describe("grade access", () => {
     expect(report.name).toBe("李明");
     expect(report.released).toBe(false);
     expect(report.report.total).toBe(2);
-    expect(report.report.items.every((item) => item.reference === "")).toBe(true);
+    expect(report.report.items).toEqual([]);
     expect(submitted.text).not.toContain("独有暗号");
     expect(submitted.text).not.toContain("要点");
+    expect(submitted.text).not.toContain("乙");
+    expect(submitted.text).not.toMatch(/correct|incorrect|partial/);
 
     const before = await post(result, { token });
     expect(before.status).toBe(200);
     expect(before.text).not.toContain("独有暗号");
     expect(before.text).not.toContain("要点");
+    expect(before.text).not.toContain("乙");
+    expect(before.text).not.toMatch(/correct|incorrect|partial/);
 
     process.env.PROCTOR_PASSPHRASE = "exam-test-pass";
     try {
@@ -127,6 +131,28 @@ describe("grade access", () => {
     expect(revealed.report.items.find((item) => item.id === "1")?.reference).toContain("乙");
     expect(revealed.report.items.find((item) => item.id === "2")?.reference).toContain("独有暗号");
     expect(revealed.report.items.find((item) => item.id === "2")?.status).toBe("blank");
+  });
+
+  it("does not grade a second try that could reveal the key", async () => {
+    await saveExam(paper, key);
+    const first = await post(attempt, { name: "探测" });
+    const second = await post(attempt, { name: "探测" });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstToken = (JSON.parse(first.text) as { token: string }).token;
+    const secondToken = (JSON.parse(second.text) as { token: string }).token;
+    const scored = await post(grade, { token: firstToken, responses: { "1": { type: "single", index: 0 } } });
+    expect(scored.status).toBe(200);
+    expect(scored.text).not.toMatch(/correct|incorrect|partial/);
+    expect(scored.text).not.toContain("乙");
+    const probed = await post(grade, { token: secondToken, responses: { "1": { type: "single", index: 1 } } });
+    expect(probed.status).toBe(409);
+    expect(probed.text).toContain("这一场已经交过卷");
+    expect(probed.text).not.toContain("乙");
+    expect(probed.text).not.toMatch(/correct|incorrect|partial/);
+    const again = await post(attempt, { name: "探测" });
+    expect(again.status).toBe(409);
+    expect(again.text).not.toContain("乙");
   });
 
   it("caps how many times one name can start", async () => {

@@ -114,6 +114,7 @@ export interface ResultView {
   report: GradeReport;
   autoSubmitted: boolean;
   released: boolean;
+  error?: string;
 }
 
 export function esc(value: string): string {
@@ -623,6 +624,7 @@ export function renderResult(view: ResultView): string {
     </header>
     <section class="card score-card">
       <p class="lede">${esc(view.name)}，成绩出来了。</p>
+      ${view.error ? banner("bad", view.error, "alert") : ""}
       ${view.autoSubmitted ? banner("warn", "时间到，试卷已自动提交。") : ""}
       <p class="score-kicker">得分</p>
       <p class="score-hero"><strong>${formatPoints(report.total)}</strong><span> / ${formatPoints(report.gradedMax)}</span></p>

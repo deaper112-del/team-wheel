@@ -132,6 +132,9 @@ describe("renderResult", () => {
     expect(hidden).not.toContain("参考答案");
     expect(hidden).not.toContain("关键词2");
     expect(hidden).toContain("监考还没有公布答案");
+    expect(hidden).not.toContain("部分正确");
+    expect(hidden).not.toContain("回答正确");
+    expect(hidden).not.toContain("你的答案");
 
     const html = renderResult({
       paper: parsed.content.paper,

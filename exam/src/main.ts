@@ -172,6 +172,7 @@ function render(): void {
       report: toCandidateReport(state.report, state.released),
       autoSubmitted: state.autoSubmitted,
       released: state.released,
+      error: state.error,
     });
     bindResult();
     return;

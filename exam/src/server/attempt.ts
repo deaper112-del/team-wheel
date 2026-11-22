@@ -69,6 +69,13 @@ function pastDeadline(started: Date | string, minutes: number | null): boolean {
   return Date.now() > Date.parse(deadline) + GRACE_MS;
 }
 
+function duplicateScore(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const message = "message" in error ? String((error as { message?: unknown }).message ?? "") : "";
+  return code === "23505" || message.toLowerCase().includes("duplicate") || message.toLowerCase().includes("unique");
+}
+
 function releasedFlag(value: boolean | string | null | undefined): boolean {
   return value === true || value === "t";
 }
@@ -80,6 +87,15 @@ async function attemptLimited(name: string, clientKey: string): Promise<AttemptR
     [name],
   );
   if (Number(named[0]?.n ?? 0) >= NAME_CAP) return { ok: false, status: 429, error: "这个姓名的考试次数已用完。" };
+  const scored = await sql<{ ready: number | string }>(
+    `select 1 as ready from exam_attempt
+     where name = $1
+       and paper_updated_at = (select updated_at from exam_paper where id = 1)
+       and submitted_at is not null
+     limit 1`,
+    [name],
+  );
+  if (scored[0]) return { ok: false, status: 409, error: "这一场已经交过卷。" };
   if (clientKey) {
     const byClient = await sql<{ n: number | string }>(
       `select count(*)::int as n from exam_attempt
@@ -156,19 +172,34 @@ export async function submitAttempt(token: string, responses: unknown): Promise<
   if (attempt.submitted_at != null && attempt.report != null) {
     return { ok: true, name: attempt.name, released, report: toCandidateReport(asJson<GradeReport>(attempt.report), released) };
   }
+  const prior = await sql<{ token: string }>(
+    `select token from exam_attempt
+     where name = $1
+       and paper_updated_at = (select updated_at from exam_paper where id = 1)
+       and submitted_at is not null
+     limit 1`,
+    [attempt.name],
+  );
+  if (prior[0]) return { ok: false, status: 409, error: "这一场已经交过卷。" };
   if (pastDeadline(attempt.started_at, attempt.duration_minutes)) {
     return { ok: false, status: 409, error: "时间已到。" };
   }
 
   const graded = await gradeSaved(answers);
   if (!graded) return { ok: false, status: 409, error: "考试还没开始。" };
-  const saved = await sql<{ report: unknown }>(
-    `update exam_attempt
-     set submitted_at = now(), report = $2::jsonb
-     where token = $1 and submitted_at is null
-     returning report`,
-    [token, JSON.stringify(graded)],
-  );
+  let saved: { report: unknown }[];
+  try {
+    saved = await sql<{ report: unknown }>(
+      `update exam_attempt
+       set submitted_at = now(), report = $2::jsonb
+       where token = $1 and submitted_at is null
+       returning report`,
+      [token, JSON.stringify(graded)],
+    );
+  } catch (error) {
+    if (!duplicateScore(error)) throw error;
+    return { ok: false, status: 409, error: "这一场已经交过卷。" };
+  }
   const stored = saved[0]?.report;
   if (stored != null) {
     return { ok: true, name: attempt.name, released, report: toCandidateReport(asJson<GradeReport>(stored), released) };
