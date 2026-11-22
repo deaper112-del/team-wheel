@@ -127,7 +127,7 @@ describe("grade access", () => {
     expect(revealed.report.items.find((item) => item.id === "2")?.status).toBe("blank");
   });
 
-  it("does not grade a second try that could reveal the key", async () => {
+  it("lets another paper under the same name submit without revealing the key", async () => {
     await saveExam(paper, key);
     const first = await post(attempt, { name: "探测" });
     const second = await post(attempt, { name: "探测" });
@@ -141,13 +141,22 @@ describe("grade access", () => {
     expect(scored.text).not.toMatch(/total|gradedMax|correct|incorrect|partial/);
     expect(scored.text).not.toContain("乙");
     const probed = await post(grade, { token: secondToken, responses: { "1": { type: "single", index: 1 } } });
-    expect(probed.status).toBe(409);
-    expect(probed.text).toContain("这一场已经交过卷");
+    expect(probed.status).toBe(200);
+    expect(JSON.parse(probed.text)).toEqual({ name: "探测", released: false, submitted: true });
     expect(probed.text).not.toContain("乙");
-    expect(probed.text).not.toMatch(/correct|incorrect|partial/);
+    expect(probed.text).not.toMatch(/total|gradedMax|correct|incorrect|partial/);
     const again = await post(attempt, { name: "探测" });
-    expect(again.status).toBe(409);
+    expect(again.status).toBe(200);
     expect(again.text).not.toContain("乙");
+    process.env.PROCTOR_PASSPHRASE = "exam-test-pass";
+    try {
+      const scores = await post(results, { passphrase: "exam-test-pass" });
+      const snap = JSON.parse(scores.text) as { candidates: { name: string; score: number }[] };
+      expect(snap.candidates.map((row) => row.score)).toEqual([0, 2]);
+      expect(scores.text).not.toContain("乙");
+    } finally {
+      delete process.env.PROCTOR_PASSPHRASE;
+    }
   });
 
   it("caps how many times one name can start", async () => {
