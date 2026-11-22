@@ -88,6 +88,9 @@ describe("renderExam", () => {
       groupOpen: false,
       subjectNote: "",
       subjectError: "",
+      names: [],
+      candidateName: "",
+      candidateChart: null,
     });
     expect(proctor).toContain("题目文件");
     expect(proctor).toContain("查看成绩");
@@ -95,6 +98,8 @@ describe("renderExam", () => {
     expect(proctor).toContain("已保存的科目");
     expect(proctor).toContain("合并科目");
     expect(proctor).toContain("学习力曲线");
+    expect(proctor).toContain("个人成绩");
+    expect(proctor).toContain("candidate-pick");
     expect(proctor).toContain("subject-pick");
     expect(proctor).toContain("答案文件");
     expect(proctor).toContain("监考口令");
@@ -183,6 +188,9 @@ describe("learning chart", () => {
       groupOpen: true,
       subjectNote: "",
       subjectError: "",
+      names: [],
+      candidateName: "",
+      candidateChart: null,
     });
     expect(html).toContain("<polyline");
     expect(html).toContain("50%");

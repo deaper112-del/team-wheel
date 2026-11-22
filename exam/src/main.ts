@@ -46,6 +46,9 @@ interface State {
   groupOpen: boolean;
   subjectNote: string;
   subjectError: string;
+  names: string[];
+  candidateName: string;
+  candidateChart: LearningChart | null;
   autoSubmitted: boolean;
   holdAuto: boolean;
 }
@@ -89,6 +92,9 @@ function fresh(): State {
     groupOpen: false,
     subjectNote: "",
     subjectError: "",
+    names: [],
+    candidateName: "",
+    candidateChart: null,
     autoSubmitted: false,
     holdAuto: false,
   };
@@ -193,6 +199,9 @@ function render(): void {
       groupOpen: state.groupOpen,
       subjectNote: state.subjectNote,
       subjectError: state.subjectError,
+      names: state.names,
+      candidateName: state.candidateName,
+      candidateChart: state.candidateChart,
     });
     bindProctor();
     return;
@@ -640,9 +649,23 @@ function bindProctor(): void {
   document.getElementById("group-papers")?.addEventListener("click", () => {
     void groupSaved();
   });
+  document.getElementById("candidate-pick")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLSelectElement)) return;
+    state.candidateName = input.value;
+    void loadSubjects(state.subjectId);
+  });
 }
 
-function applyBoard(body: { subjects?: SubjectInfo[]; subjectId?: number | null; chart?: LearningChart | null }): void {
+function applyBoard(body: {
+  subjects?: SubjectInfo[];
+  subjectId?: number | null;
+  chart?: LearningChart | null;
+  names?: string[];
+  candidateName?: string | null;
+  candidateChart?: LearningChart | null;
+  candidateLoaded?: boolean;
+}): void {
   if (!Array.isArray(body.subjects)) return;
   state.subjects = body.subjects;
   const preferred = typeof body.subjectId === "number" ? body.subjectId : state.subjectId;
@@ -650,6 +673,15 @@ function applyBoard(body: { subjects?: SubjectInfo[]; subjectId?: number | null;
   state.subjectId = subject?.id ?? null;
   if (!subject?.papers.some((item) => item.id === state.paperId)) state.paperId = subject?.papers[0]?.id ?? null;
   state.chart = body.chart ?? null;
+  if (Array.isArray(body.names)) state.names = body.names;
+  if (body.candidateLoaded) {
+    const picked = typeof body.candidateName === "string" ? body.candidateName : "";
+    state.candidateName = state.names.includes(picked) ? picked : "";
+    state.candidateChart = state.candidateName ? (body.candidateChart ?? null) : null;
+  } else if (state.candidateName && !state.names.includes(state.candidateName)) {
+    state.candidateName = "";
+    state.candidateChart = null;
+  }
 }
 
 function passphraseFromForm(): string {
@@ -676,7 +708,7 @@ async function loadSubjects(subjectId: number | null): Promise<void> {
     const response = await fetch("/api/proctor/subjects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ passphrase, subjectId }),
+      body: JSON.stringify({ passphrase, subjectId, candidateName: state.candidateName }),
     });
     const body = (await response.json()) as { error?: string; subjects?: SubjectInfo[]; subjectId?: number | null; chart?: LearningChart | null };
     if (gen !== subjectGen) return;

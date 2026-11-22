@@ -34,6 +34,9 @@ export interface SubjectBoard {
   subjects: SubjectInfo[];
   subjectId: number | null;
   chart: LearningChart | null;
+  names: string[];
+  candidateName: string | null;
+  candidateChart: LearningChart | null;
 }
 
 interface SavedRow {
@@ -237,7 +240,7 @@ export async function groupPapers(paperIds: number[], target: { subjectId?: numb
   return { ok: true, subjectId };
 }
 
-export async function subjectBoard(preferId: number | null): Promise<SubjectBoard> {
+export async function subjectBoard(preferId: number | null, candidateName: string | null = null): Promise<SubjectBoard> {
   await rememberLive();
   const rows = await sql<SavedRow>(
     `select p.id, p.subject_id, p.title, p.created_at, s.name as subject_name,
@@ -261,7 +264,54 @@ export async function subjectBoard(preferId: number | null): Promise<SubjectBoar
   const subjects = [...bySubject.values()];
   const subjectId = subjects.some((subject) => subject.id === preferId) ? preferId : (subjects[0]?.id ?? null);
   const chart = subjectId == null ? null : await subjectChart(subjectId);
-  return { subjects, subjectId, chart };
+  const names = subjectId == null ? [] : await candidateNames(subjectId);
+  const picked = candidateName && names.includes(candidateName) ? candidateName : null;
+  const candidateChart = subjectId != null && picked ? await personChart(subjectId, picked) : null;
+  return { subjects, subjectId, chart, names, candidateName: picked, candidateChart };
+}
+
+export async function candidateNames(subjectId: number): Promise<string[]> {
+  const rows = await sql<{ name: string }>(
+    `select distinct a.name
+     from exam_attempt a
+     join exam_round r on a.paper_updated_at = r.paper_updated_at
+     where r.subject_id = $1 and a.submitted_at is not null and a.name <> ''
+     order by a.name`,
+    [subjectId],
+  );
+  return rows.map((row) => row.name);
+}
+
+export async function personChart(subjectId: number, name: string): Promise<LearningChart | null> {
+  await alignRoundStamps();
+  const rows = await sql<{ round_id: number | string; started_at: Date | string; title: string; report: unknown }>(
+    `select distinct on (r.id) r.id as round_id, r.started_at, p.title, a.report
+     from exam_round r
+     join exam_saved_paper p on p.id = r.paper_id
+     join exam_attempt a
+       on a.paper_updated_at = r.paper_updated_at
+      and a.submitted_at is not null
+      and a.report is not null
+      and a.name = $2
+     where r.subject_id = $1
+     order by r.id, a.submitted_at desc`,
+    [subjectId, name],
+  );
+  rows.sort((left, right) => stamp(left.started_at).localeCompare(stamp(right.started_at)) || num(left.round_id) - num(right.round_id));
+  const points: LearningPoint[] = rows.map((row, index) => {
+    const report = asJson<GradeReport>(row.report);
+    const earned = report && Number.isFinite(report.total) ? report.total : 0;
+    const max = report && Number.isFinite(report.gradedMax) ? report.gradedMax : 0;
+    return {
+      round: index + 1,
+      at: stamp(row.started_at),
+      paperTitle: row.title,
+      rate: max > 0 ? earned / max : null,
+      correct: earned,
+      total: max,
+    };
+  });
+  return { name, points };
 }
 
 export async function subjectChart(subjectId: number): Promise<LearningChart | null> {

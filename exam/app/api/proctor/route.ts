@@ -56,5 +56,6 @@ export async function POST(request: Request): Promise<Response> {
     subjects: board.subjects,
     subjectId: board.subjectId,
     chart: board.chart,
+    names: board.names,
   });
 }

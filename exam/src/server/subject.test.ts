@@ -147,11 +147,47 @@ describe("subjects", () => {
       groupOpen: false,
       subjectNote: "",
       subjectError: "",
+      names: [],
+      candidateName: "",
+      candidateChart: null,
     });
     expect(html).toContain("<polyline");
     expect(html).toContain("第1场");
     expect(html).toContain("第2场");
     expect(html).toContain("第3场");
     expect(html).not.toContain("科目暗号");
+  });
+
+  it("draws one person's score curve without the other candidate", async () => {
+    const paper: Paper = {
+      title: "个人曲线",
+      durationMinutes: null,
+      questions: [{ id: "1", type: "single", stem: "个人题", options: ["甲", "乙"], score: 2, blanks: 0 }],
+    };
+    let subjectId = 0;
+    for (let index = 0; index < 2; index += 1) {
+      await sql("select pg_sleep(0.02)");
+      const published = await publishUploaded(paper, keyA);
+      subjectId = published.subjectId;
+      await sql(
+        `insert into exam_attempt (token, name, paper_updated_at, submitted_at, report)
+         select $1, '周宁', updated_at, now(), $2::jsonb from exam_paper where id = 1`,
+        [`e${index}`.padEnd(64, "e"), JSON.stringify(report(index === 0 ? "correct" : "incorrect"))],
+      );
+      await sql(
+        `insert into exam_attempt (token, name, paper_updated_at, submitted_at, report)
+         select $1, '李明', updated_at, now(), $2::jsonb from exam_paper where id = 1`,
+        [`f${index}`.padEnd(64, "f"), JSON.stringify(report("correct"))],
+      );
+    }
+    const board = await subjectBoard(subjectId, "周宁");
+    expect(board.names).toEqual(["周宁", "李明"]);
+    expect(board.chart?.points).toHaveLength(2);
+    expect(board.candidateName).toBe("周宁");
+    expect(board.candidateChart?.points.map((point) => point.rate)).toEqual([1, 0]);
+    expect(JSON.stringify(board.candidateChart)).not.toContain("科目暗号");
+    const other = await subjectBoard(subjectId, "不存在");
+    expect(other.candidateName).toBeNull();
+    expect(other.candidateChart).toBeNull();
   });
 });

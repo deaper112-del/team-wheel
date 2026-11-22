@@ -103,6 +103,9 @@ export interface ProctorView {
   groupOpen: boolean;
   subjectNote: string;
   subjectError: string;
+  names: string[];
+  candidateName: string;
+  candidateChart: LearningChart | null;
 }
 
 export interface ResultView {
@@ -321,30 +324,43 @@ function subjectsCard(view: ProctorView): string {
       </details>
       <h2 class="chart-title">学习力曲线</h2>
       <p class="fine">${subject ? `${esc(subject.name)}的各场考试画在同一条曲线上。` : "刷新科目后，这里按科目画出各场正确率。"}</p>
-      ${chartBody(view.chart)}
+      ${chartBody(view.chart, "rate")}
+      <h2 class="chart-title">个人成绩</h2>
+      <p class="fine">选择一个考过这一科的人，看这个人各场的得分。</p>
+      <label class="name-field" for="candidate-pick">考生
+        <select id="candidate-pick"${view.names.length === 0 ? " disabled" : ""}>
+          ${view.names.length === 0 ? `<option value="">还没有考生交卷</option>` : `<option value="">选择考生</option>`}
+          ${view.names
+            .map((name) => `<option value="${esc(name)}"${name === view.candidateName ? " selected" : ""}>${esc(name)}</option>`)
+            .join("")}
+        </select>
+      </label>
+      ${view.candidateName && !view.candidateChart ? `<p class="fine">这个人还没有这一科的成绩。</p>` : chartBody(view.candidateChart, "score")}
     </section>`;
 }
 
-function chartBody(chart: LearningChart | null): string {
+function chartBody(chart: LearningChart | null, mode: "rate" | "score"): string {
   if (!chart) return "";
-  if (chart.points.length === 0) return `<p class="fine">这一科还没有开过考。</p>`;
+  if (chart.points.length === 0) return `<p class="fine">${mode === "score" ? "这个人还没有这一科的成绩。" : "这一科还没有开过考。"}</p>`;
   const rows = chart.points
     .map((point) => {
       const rate = point.rate == null ? "尚未交卷" : `${Math.round(point.rate * 100)}%`;
-      return `<tr><td>第${point.round}场</td><td>${esc(point.paperTitle)}</td><td>${rate}</td><td>${point.correct} / ${point.total}</td></tr>`;
+      const score = point.rate == null ? "尚未交卷" : `${formatPoints(point.correct)} / ${formatPoints(point.total)}`;
+      return `<tr><td>第${point.round}场</td><td>${esc(point.paperTitle)}</td><td>${mode === "score" ? score : rate}</td><td>${mode === "score" ? rate : `${point.correct} / ${point.total}`}</td></tr>`;
     })
     .join("");
   const graded = chart.points.filter((point) => point.rate != null).length;
   const hint = graded < 2 ? `<p class="fine">再完成一场并有人交卷后，点会连成曲线。</p>` : "";
-  return `${learningSvg(chart.points)}
+  const label = mode === "score" ? "个人成绩" : "学习力曲线";
+  return `${learningSvg(chart.points, label, mode === "score" ? "#8a4b08" : "#0c5c56")}
     ${hint}
     <table class="score-table">
-      <thead><tr><th>场次</th><th>试卷</th><th>正确率</th><th>答对</th></tr></thead>
+      <thead><tr><th>场次</th><th>试卷</th><th>${mode === "score" ? "得分" : "正确率"}</th><th>${mode === "score" ? "得分率" : "答对"}</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
 
-function learningSvg(points: LearningPoint[]): string {
+function learningSvg(points: LearningPoint[], label: string, color: string): string {
   const width = 320;
   const height = 168;
   const left = 36;
@@ -373,16 +389,16 @@ function learningSvg(points: LearningPoint[]): string {
     const y = yAt(point.rate);
     scored.push(`${x},${y}`);
     dots.push(
-      `<circle cx="${x}" cy="${y}" r="4.5" fill="#0c5c56"/>
-       <text x="${x}" y="${y - 8}" text-anchor="middle" font-size="11" fill="#084843">${Math.round(point.rate * 100)}%</text>
+      `<circle cx="${x}" cy="${y}" r="4.5" fill="${color}"/>
+       <text x="${x}" y="${y - 8}" text-anchor="middle" font-size="11" fill="${color}">${Math.round(point.rate * 100)}%</text>
        <text x="${x}" y="${height - 14}" text-anchor="middle" font-size="11" fill="#5d6b66">第${point.round}场</text>`,
     );
   });
   const lines =
     scored.length >= 2
-      ? `<polyline points="${scored.join(" ")}" fill="none" stroke="#0c5c56" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
+      ? `<polyline points="${scored.join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
       : "";
-  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="学习力曲线">
+  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(label)}">
     ${grids}
     ${lines}
     ${dots.join("")}
