@@ -1,6 +1,7 @@
 delete from exam_attempt as older
 using exam_attempt as newer
-where older.submitted_at is not null
+where older.ctid <> newer.ctid
+  and older.submitted_at is not null
   and newer.submitted_at is not null
   and older.name = newer.name
   and older.paper_updated_at = newer.paper_updated_at
