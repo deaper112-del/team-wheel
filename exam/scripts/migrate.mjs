@@ -1,6 +1,21 @@
 import { readdir, readFile } from "node:fs/promises";
 import pg from "pg";
 
+function statementsOf(sqlText) {
+  return sqlText
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.split("\n").some((line) => {
+      const trimmed = line.trim();
+      return trimmed !== "" && !trimmed.startsWith("--");
+    }));
+}
+
+function safeMessage(error) {
+  const message = error instanceof Error ? error.message : "migration failed";
+  return /postgres(ql)?:\/\//i.test(message) ? "migration failed" : message;
+}
+
 const url = process.env.DATABASE_URL?.trim() ?? "";
 const files = (await readdir("migrations").catch(() => []))
   .filter((file) => file.endsWith(".sql"))
@@ -21,12 +36,14 @@ try {
   for (const file of files.filter((name) => !done.has(name))) {
     await client.query("begin");
     try {
-      await client.query(await readFile(`migrations/${file}`, "utf8"));
+      const statements = statementsOf(await readFile(`migrations/${file}`, "utf8"));
+      for (const statement of statements) await client.query(statement);
       await client.query("insert into schema_migrations (name) values ($1)", [file]);
       await client.query("commit");
       console.log(`migrate: applied ${file}`);
     } catch (error) {
       await client.query("rollback");
+      console.error(`migrate: ${file} failed: ${safeMessage(error)}`);
       throw error;
     }
   }
