@@ -15,7 +15,7 @@ export type AttemptResult =
   | { ok: false; status: number; error: string };
 
 export type SubmitResult =
-  | { ok: true; name: string; report: GradeReport; released: boolean }
+  | { ok: true; name: string; report: GradeReport | null; released: boolean }
   | { ok: false; status: number; error: string };
 
 export interface ScoreRow {

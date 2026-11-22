@@ -72,26 +72,19 @@ describe("grade access", () => {
 
     const submitted = await post(grade, { token, responses: { "1": { type: "single", index: 1 } } });
     expect(submitted.status).toBe(200);
-    const report = JSON.parse(submitted.text) as {
-      name: string;
-      released: boolean;
-      report: { total: number; items: { id: string; reference: string }[] };
-    };
-    expect(report.name).toBe("李明");
-    expect(report.released).toBe(false);
-    expect(report.report.total).toBe(2);
-    expect(report.report.items).toEqual([]);
+    expect(JSON.parse(submitted.text)).toEqual({ name: "李明", released: false, submitted: true });
     expect(submitted.text).not.toContain("独有暗号");
     expect(submitted.text).not.toContain("要点");
     expect(submitted.text).not.toContain("乙");
-    expect(submitted.text).not.toMatch(/correct|incorrect|partial/);
+    expect(submitted.text).not.toMatch(/total|gradedMax|correct|incorrect|partial/);
 
     const before = await post(result, { token });
     expect(before.status).toBe(200);
+    expect(JSON.parse(before.text)).toEqual({ name: "李明", released: false, submitted: true });
     expect(before.text).not.toContain("独有暗号");
     expect(before.text).not.toContain("要点");
     expect(before.text).not.toContain("乙");
-    expect(before.text).not.toMatch(/correct|incorrect|partial/);
+    expect(before.text).not.toMatch(/total|gradedMax|correct|incorrect|partial/);
 
     process.env.PROCTOR_PASSPHRASE = "exam-test-pass";
     try {
@@ -126,8 +119,9 @@ describe("grade access", () => {
 
     const after = await post(result, { token });
     expect(after.status).toBe(200);
-    const revealed = JSON.parse(after.text) as { released: boolean; report: { items: { id: string; reference: string; status: string }[] } };
+    const revealed = JSON.parse(after.text) as { released: boolean; report: { total: number; items: { id: string; reference: string; status: string }[] } };
     expect(revealed.released).toBe(true);
+    expect(revealed.report.total).toBe(2);
     expect(revealed.report.items.find((item) => item.id === "1")?.reference).toContain("乙");
     expect(revealed.report.items.find((item) => item.id === "2")?.reference).toContain("独有暗号");
     expect(revealed.report.items.find((item) => item.id === "2")?.status).toBe("blank");
@@ -143,7 +137,8 @@ describe("grade access", () => {
     const secondToken = (JSON.parse(second.text) as { token: string }).token;
     const scored = await post(grade, { token: firstToken, responses: { "1": { type: "single", index: 0 } } });
     expect(scored.status).toBe(200);
-    expect(scored.text).not.toMatch(/correct|incorrect|partial/);
+    expect(JSON.parse(scored.text)).toEqual({ name: "探测", released: false, submitted: true });
+    expect(scored.text).not.toMatch(/total|gradedMax|correct|incorrect|partial/);
     expect(scored.text).not.toContain("乙");
     const probed = await post(grade, { token: secondToken, responses: { "1": { type: "single", index: 1 } } });
     expect(probed.status).toBe(409);

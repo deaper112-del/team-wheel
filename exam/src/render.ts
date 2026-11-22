@@ -111,7 +111,7 @@ export interface ProctorView {
 export interface ResultView {
   paper: Paper;
   name: string;
-  report: GradeReport;
+  report: GradeReport | null;
   autoSubmitted: boolean;
   released: boolean;
   error?: string;
@@ -575,9 +575,33 @@ function whyText(item: GradeReport["items"][number]): string {
 }
 
 export function renderResult(view: ResultView): string {
-  const report = view.released
-    ? view.report
-    : { ...view.report, items: view.report.items.map((item) => ({ ...item, reference: "", note: "" })) };
+  if (!view.released || !view.report) {
+    return `<div class="wrap">
+      <header class="mast">
+        <div class="brand">
+          <span class="seal" aria-hidden="true">考</span>
+          <div>
+            <p class="eyebrow">考试结束</p>
+            <h1>${esc(view.paper.title)}</h1>
+          </div>
+        </div>
+      </header>
+      <section class="card score-card">
+        <p class="lede">${esc(view.name)}，试卷已提交。</p>
+        ${view.error ? banner("bad", view.error, "alert") : ""}
+        ${view.autoSubmitted ? banner("warn", "时间到，试卷已自动提交。") : ""}
+        <p class="fine">监考还没有公布答案。公布之后，点「查看答案」可以看到成绩和正确答案。</p>
+      </section>
+      <section class="card">
+        <div class="row-actions">
+          <button type="button" class="primary" id="refresh-result">查看答案</button>
+          <button type="button" class="ghost" id="retry">再考一次</button>
+          <button type="button" class="ghost" id="reset">返回首页</button>
+        </div>
+      </section>
+    </div>`;
+  }
+  const report = view.report;
   const missing =
     report.missingIds.length > 0
       ? banner("warn", `以下题号在答案文件中没有对应答案，无法评分：${report.missingIds.join("、")}。`)

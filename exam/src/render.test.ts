@@ -128,7 +128,9 @@ describe("renderResult", () => {
       autoSubmitted: false,
       released: false,
     });
-    expect(hidden).toContain("5");
+    expect(hidden).toContain("试卷已提交");
+    expect(hidden).not.toContain("5");
+    expect(hidden).not.toContain("得分");
     expect(hidden).not.toContain("参考答案");
     expect(hidden).not.toContain("关键词2");
     expect(hidden).toContain("监考还没有公布答案");

@@ -137,7 +137,7 @@ function persist(): void {
     responses: state.responses,
     startedAt: state.startedAt,
     deadline: state.deadline,
-    report: state.phase === "result" && state.report ? toCandidateReport(state.report, state.released) : null,
+    report: state.phase === "result" && state.released && state.report ? state.report : null,
     autoSubmitted: state.autoSubmitted,
   };
   try {
@@ -165,13 +165,14 @@ function render(): void {
     startTicker();
     return;
   }
-  if (state.phase === "result" && paper && state.report) {
+  if (state.phase === "result" && paper) {
+    const report = state.released && state.report ? toCandidateReport(state.report, true) : null;
     root.innerHTML = renderResult({
       paper,
       name: state.name,
-      report: toCandidateReport(state.report, state.released),
+      report,
       autoSubmitted: state.autoSubmitted,
-      released: state.released,
+      released: Boolean(report),
       error: state.error,
     });
     bindResult();
@@ -255,10 +256,10 @@ function restoreProgress(): void {
   state.responses = saved.responses || {};
   state.startedAt = saved.startedAt;
   state.released = false;
-  state.report = saved.report ? toCandidateReport(saved.report, false) : null;
+  state.report = null;
   state.autoSubmitted = saved.autoSubmitted;
   state.role = "candidate";
-  state.phase = saved.phase === "result" && saved.report ? "result" : "exam";
+  state.phase = saved.phase === "result" ? "result" : "exam";
 }
 
 function qidSelector(id: string): string {
@@ -408,8 +409,8 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: state.attemptToken, responses: state.responses }),
     });
-    const body = (await response.json()) as { error?: string; report?: GradeReport; released?: boolean };
-    if (!response.ok || !body.report) {
+    const body = (await response.json()) as { error?: string; report?: GradeReport; released?: boolean; submitted?: boolean };
+    if (!response.ok || (!body.report && !body.submitted)) {
       state.error = body.error || "交卷失败，请再试一次。";
       state.phase = "exam";
       submitting = false;
@@ -417,7 +418,7 @@ async function submit(auto: boolean, confirmed = false): Promise<void> {
       return;
     }
     state.released = Boolean(body.released);
-    state.report = toCandidateReport(body.report, state.released);
+    state.report = state.released && body.report ? body.report : null;
     state.autoSubmitted = auto;
     state.phase = "result";
     state.error = "";
@@ -873,14 +874,14 @@ async function refreshResult(): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: state.attemptToken }),
     });
-    const body = (await response.json()) as { error?: string; name?: string; report?: GradeReport; released?: boolean };
-    if (!response.ok || !body.report) {
+    const body = (await response.json()) as { error?: string; name?: string; report?: GradeReport; released?: boolean; submitted?: boolean };
+    if (!response.ok || (!body.report && !body.submitted)) {
       state.error = body.error || "无法查看成绩。";
       render();
       return;
     }
     state.released = Boolean(body.released);
-    state.report = toCandidateReport(body.report, state.released);
+    state.report = state.released && body.report ? body.report : null;
     if (body.name) state.name = body.name;
     state.phase = "result";
     state.error = "";

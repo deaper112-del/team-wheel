@@ -1,3 +1,4 @@
+import { candidatePayload } from "../../../src/reportView";
 import { submitAttempt } from "../../../src/server/attempt";
 import { json } from "../../../src/server/http";
 
@@ -20,5 +21,5 @@ export async function POST(request: Request): Promise<Response> {
   const token = typeof raw.token === "string" ? raw.token : "";
   const result = await submitAttempt(token, raw.responses);
   if (!result.ok) return json({ error: result.error }, result.status);
-  return json({ name: result.name, report: result.report, released: result.released });
+  return json(candidatePayload(result.name, result.released, result.report));
 }
