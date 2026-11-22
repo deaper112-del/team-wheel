@@ -55,6 +55,33 @@ export interface RoundSnapshot {
   easiest: QuestionRate | null;
 }
 
+export interface SavedPaperInfo {
+  id: number;
+  title: string;
+  createdAt: string;
+  questionCount: number;
+}
+
+export interface SubjectInfo {
+  id: number;
+  name: string;
+  papers: SavedPaperInfo[];
+}
+
+export interface LearningPoint {
+  round: number;
+  at: string;
+  paperTitle: string;
+  rate: number | null;
+  correct: number;
+  total: number;
+}
+
+export interface LearningChart {
+  name: string;
+  points: LearningPoint[];
+}
+
 export interface ProctorView {
   passphrase: string;
   questionLabel: string;
@@ -66,6 +93,16 @@ export interface ProctorView {
   busy: boolean;
   results: RoundSnapshot | null;
   resultsNote: string;
+  subjects: SubjectInfo[];
+  subjectId: number | null;
+  paperId: number | null;
+  chart: LearningChart | null;
+  groupIds: number[];
+  groupTarget: string;
+  groupName: string;
+  groupOpen: boolean;
+  subjectNote: string;
+  subjectError: string;
 }
 
 export interface ResultView {
@@ -148,7 +185,7 @@ export function renderProctor(view: ProctorView): string {
   return `<div class="wrap">
     ${mast("监考", "发布试卷")}
     <form id="proctor-form" class="card">
-      <p class="lede">上传题目和答案后，所有考生打开同一链接、填写姓名即可开始。更换文件会替换当前试卷。</p>
+      <p class="lede">上传题目和答案后，所有考生打开同一链接、填写姓名即可开始。再上传会开始新的一场，原来的试卷留在科目里。</p>
       ${view.summary ? `<p class="summary">${esc(view.summary)}</p>` : `<p class="fine">还没有发布试卷。</p>`}
       <label class="name-field" for="proctor-pass">监考口令
         <input id="proctor-pass" type="password" autocomplete="current-password" placeholder="请输入口令" value="${esc(view.passphrase)}">
@@ -190,6 +227,7 @@ export function renderProctor(view: ProctorView): string {
         <button type="button" class="ghost" id="back-gate">返回</button>
       </div>
     </form>
+    ${subjectsCard(view)}
     <section class="card" id="proctor-results">
       <h2>本场成绩</h2>
       <p class="fine">查看这一场已经交卷的考生。公布答案之后，考生重新打开成绩就能看到正确答案。</p>
@@ -201,6 +239,161 @@ export function renderProctor(view: ProctorView): string {
       ${resultsBody(view.results)}
     </section>
   </div>`;
+}
+
+function whenLabel(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function subjectsCard(view: ProctorView): string {
+  const subject = view.subjects.find((item) => item.id === view.subjectId) ?? view.subjects[0];
+  const subjectOptions = view.subjects
+    .map((item) => `<option value="${item.id}"${item.id === subject?.id ? " selected" : ""}>${esc(item.name)}（${item.papers.length} 份）</option>`)
+    .join("");
+  const papers = subject?.papers ?? [];
+  const paperId = papers.some((item) => item.id === view.paperId) ? view.paperId : papers[0]?.id;
+  const paperOptions = papers
+    .map(
+      (item) =>
+        `<option value="${item.id}"${item.id === paperId ? " selected" : ""}>${esc(item.title)} · ${item.questionCount} 题 · ${esc(whenLabel(item.createdAt))}</option>`,
+    )
+    .join("");
+  const checks = view.subjects
+    .flatMap((item) =>
+      item.papers.map(
+        (paper) => `<label class="check">
+          <input class="group-paper" type="checkbox" value="${paper.id}"${view.groupIds.includes(paper.id) ? " checked" : ""}>
+          <span>${esc(item.name)} · ${esc(paper.title)} · ${paper.questionCount} 题</span>
+        </label>`,
+      ),
+    )
+    .join("");
+  const groupOptions = [
+    `<option value=""${view.groupTarget === "" ? " selected" : ""}>新建科目</option>`,
+    ...view.subjects.map(
+      (item) => `<option value="${item.id}"${view.groupTarget === String(item.id) ? " selected" : ""}>${esc(item.name)}</option>`,
+    ),
+  ].join("");
+  return `<section class="card" id="saved-subjects">
+      <h2>已保存的科目</h2>
+      <p class="fine">每份上传的试卷都会留下。题目相同的试卷自动算作同一科目，选中后可以直接再开一场，不用重新上传。</p>
+      <div class="row-actions">
+        <button type="button" class="ghost" id="load-subjects"${view.busy ? " disabled" : ""}>刷新科目</button>
+      </div>
+      ${banner("info", view.subjectNote)}
+      ${banner("bad", view.subjectError, "alert")}
+      <label class="name-field" for="subject-pick">科目
+        <select id="subject-pick"${view.subjects.length === 0 ? " disabled" : ""}>
+          ${subjectOptions || `<option value="">还没有保存的科目</option>`}
+        </select>
+      </label>
+      <label class="name-field" for="paper-pick">这一科的试卷
+        <select id="paper-pick"${papers.length === 0 ? " disabled" : ""}>
+          ${paperOptions || `<option value="">先上传或刷新科目</option>`}
+        </select>
+      </label>
+      <div class="row-actions">
+        <button type="button" class="primary" id="start-saved"${view.busy || papers.length === 0 ? " disabled" : ""}>开始这场考试</button>
+      </div>
+      <details id="group-menu" class="help"${view.groupOpen ? " open" : ""}>
+        <summary>合并科目</summary>
+        <div class="help-body">
+          <p>勾选已经上传的试卷，把它们归到同一个科目。题目完全相同的试卷会一起过去，之后共用下面的学习力曲线。</p>
+          <div class="paper-checks">${checks || `<p class="fine">还没有可以合并的试卷。</p>`}</div>
+          <label class="name-field" for="group-target">合并到
+            <select id="group-target">${groupOptions}</select>
+          </label>
+          <label class="name-field" for="group-name">新科目名称
+            <input id="group-name" type="text" maxlength="40" placeholder="选「新建科目」时填写" value="${esc(view.groupName)}">
+          </label>
+          <div class="row-actions">
+            <button type="button" class="primary" id="group-papers"${view.busy ? " disabled" : ""}>合并到这个科目</button>
+          </div>
+        </div>
+      </details>
+      <h2 class="chart-title">学习力曲线</h2>
+      <p class="fine">${subject ? `${esc(subject.name)}的各场考试画在同一条曲线上。` : "刷新科目后，这里按科目画出各场正确率。"}</p>
+      ${chartBody(view.chart)}
+    </section>`;
+}
+
+function chartBody(chart: LearningChart | null): string {
+  if (!chart) return "";
+  if (chart.points.length === 0) return `<p class="fine">这一科还没有开过考。</p>`;
+  const rows = chart.points
+    .map((point) => {
+      const rate = point.rate == null ? "尚未交卷" : `${Math.round(point.rate * 100)}%`;
+      return `<tr><td>第${point.round}场</td><td>${esc(point.paperTitle)}</td><td>${rate}</td><td>${point.correct} / ${point.total}</td></tr>`;
+    })
+    .join("");
+  const graded = chart.points.filter((point) => point.rate != null).length;
+  const hint = graded < 2 ? `<p class="fine">再完成一场并有人交卷后，点会连成曲线。</p>` : "";
+  return `${learningSvg(chart.points)}
+    ${hint}
+    <table class="score-table">
+      <thead><tr><th>场次</th><th>试卷</th><th>正确率</th><th>答对</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function learningSvg(points: LearningPoint[]): string {
+  const width = 320;
+  const height = 168;
+  const left = 36;
+  const right = 8;
+  const top = 20;
+  const bottom = 36;
+  const innerW = width - left - right;
+  const innerH = height - top - bottom;
+  const xAt = (index: number) => (points.length === 1 ? left + innerW / 2 : left + (innerW * index) / (points.length - 1));
+  const yAt = (rate: number) => top + innerH * (1 - rate);
+  const grids = [0, 0.5, 1]
+    .map((rate) => {
+      const y = yAt(rate);
+      return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="#e3d9c8"/>
+        <text x="0" y="${y + 4}" font-size="11" fill="#5d6b66">${Math.round(rate * 100)}%</text>`;
+    })
+    .join("");
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  const dots: string[] = [];
+  points.forEach((point, index) => {
+    const x = xAt(index);
+    if (point.rate == null) {
+      if (current.length > 0) chunks.push(current);
+      current = [];
+      dots.push(`<text x="${x}" y="${height - 14}" text-anchor="middle" font-size="11" fill="#5d6b66">第${point.round}场</text>`);
+      return;
+    }
+    const y = yAt(point.rate);
+    current.push(`${x},${y}`);
+    dots.push(
+      `<circle cx="${x}" cy="${y}" r="4.5" fill="#0c5c56"/>
+       <text x="${x}" y="${y - 8}" text-anchor="middle" font-size="11" fill="#084843">${Math.round(point.rate * 100)}%</text>
+       <text x="${x}" y="${height - 14}" text-anchor="middle" font-size="11" fill="#5d6b66">第${point.round}场</text>`,
+    );
+  });
+  if (current.length > 0) chunks.push(current);
+  const lines = chunks
+    .filter((chunk) => chunk.length >= 2)
+    .map(
+      (chunk) =>
+        `<polyline points="${chunk.join(" ")}" fill="none" stroke="#0c5c56" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`,
+    )
+    .join("");
+  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="学习力曲线">
+    ${grids}
+    ${lines}
+    ${dots.join("")}
+  </svg>`;
 }
 
 function clipStem(stem: string): string {

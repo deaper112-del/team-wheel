@@ -2,7 +2,7 @@ import { paperSummary } from "../../../src/display";
 import { combineUploads } from "../../../src/grade";
 import { parseExamFile } from "../../../src/parse";
 import { json, readFileEntry } from "../../../src/server/http";
-import { saveExam } from "../../../src/server/paper";
+import { publishUploaded, subjectBoard } from "../../../src/server/subjects";
 import { proctorPassphraseConfigured, proctorPassphraseMatches } from "../../../src/server/passphrase";
 import { proctorAttemptsBlocked, recordProctorFailure } from "../../../src/server/proctorLimit";
 import type { FileContent } from "../../../src/types";
@@ -46,10 +46,15 @@ export async function POST(request: Request): Promise<Response> {
   }
   const combined = combineUploads(questionContent, answerContent);
   if (!combined.ok) return json({ error: combined.error }, 400);
-  await saveExam(combined.paper, combined.key);
+  const saved = await publishUploaded(combined.paper, combined.key);
+  const board = await subjectBoard(saved.subjectId);
   return json({
     ok: true,
     summary: paperSummary(combined.paper),
     warning: combined.warning,
+    subjectName: saved.subjectName,
+    subjects: board.subjects,
+    subjectId: board.subjectId,
+    chart: board.chart,
   });
 }

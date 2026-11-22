@@ -58,7 +58,7 @@ export async function getPublicExam(): Promise<PublicExam | null> {
   };
 }
 
-export async function saveExam(paper: Paper, key: AnswerKey): Promise<string> {
+export async function saveExam(paper: Paper, key: AnswerKey): Promise<Date | string> {
   const rows = await sql<{ updated_at: Date | string }>(
     `insert into exam_paper (id, title, duration_minutes, questions, answer_key, answers_released, updated_at)
      values (1, $1, $2, $3::jsonb, $4::jsonb, false, now())
@@ -72,8 +72,7 @@ export async function saveExam(paper: Paper, key: AnswerKey): Promise<string> {
      returning updated_at`,
     [paper.title, paper.durationMinutes, JSON.stringify(paper.questions), JSON.stringify(key)],
   );
-  const stamp = rows[0]?.updated_at;
-  return stamp instanceof Date ? stamp.toISOString() : String(stamp ?? new Date().toISOString());
+  return rows[0]?.updated_at ?? new Date();
 }
 
 export async function gradeSaved(responses: Record<string, ResponseValue | undefined>): Promise<GradeReport | null> {

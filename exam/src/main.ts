@@ -1,6 +1,6 @@
 import { formatDuration, paperSummary } from "./display";
 import { countAnswered } from "./grade";
-import { renderCandidate, renderExam, renderGate, renderProctor, renderResult, type RoundSnapshot } from "./render";
+import { renderCandidate, renderExam, renderGate, renderProctor, renderResult, type LearningChart, type RoundSnapshot, type SubjectInfo } from "./render";
 import { toCandidateReport } from "./reportView";
 import { clearProgress, loadProgress, saveProgress, wipeLegacyStore, type ProgressRecord } from "./storage";
 import { answerTemplateText, questionTemplateText, templateXlsxBytes } from "./templates";
@@ -36,6 +36,16 @@ interface State {
   released: boolean;
   results: RoundSnapshot | null;
   resultsNote: string;
+  subjects: SubjectInfo[];
+  subjectId: number | null;
+  paperId: number | null;
+  chart: LearningChart | null;
+  groupIds: number[];
+  groupTarget: string;
+  groupName: string;
+  groupOpen: boolean;
+  subjectNote: string;
+  subjectError: string;
   autoSubmitted: boolean;
   holdAuto: boolean;
 }
@@ -69,6 +79,16 @@ function fresh(): State {
     released: false,
     results: null,
     resultsNote: "",
+    subjects: [],
+    subjectId: null,
+    paperId: null,
+    chart: null,
+    groupIds: [],
+    groupTarget: "",
+    groupName: "",
+    groupOpen: false,
+    subjectNote: "",
+    subjectError: "",
     autoSubmitted: false,
     holdAuto: false,
   };
@@ -163,6 +183,16 @@ function render(): void {
       busy: state.busy,
       results: state.results,
       resultsNote: state.resultsNote,
+      subjects: state.subjects,
+      subjectId: state.subjectId,
+      paperId: state.paperId,
+      chart: state.chart,
+      groupIds: state.groupIds,
+      groupTarget: state.groupTarget,
+      groupName: state.groupName,
+      groupOpen: state.groupOpen,
+      subjectNote: state.subjectNote,
+      subjectError: state.subjectError,
     });
     bindProctor();
     return;
@@ -491,7 +521,15 @@ async function publish(): Promise<void> {
   if (state.answerFile) data.set("answer", state.answerFile);
   try {
     const response = await fetch("/api/proctor", { method: "POST", body: data });
-    const body = (await response.json()) as { error?: string; summary?: string; warning?: string };
+    const body = (await response.json()) as {
+      error?: string;
+      summary?: string;
+      warning?: string;
+      subjectName?: string;
+      subjects?: SubjectInfo[];
+      subjectId?: number | null;
+      chart?: LearningChart | null;
+    };
     if (!response.ok) {
       state.error = body.error || "发布失败。";
       state.busy = false;
@@ -499,7 +537,8 @@ async function publish(): Promise<void> {
       return;
     }
     await loadExam();
-    state.info = body.summary || "试卷已发布。";
+    state.info = body.subjectName ? `${body.summary || "试卷已发布。"} 已归入科目「${body.subjectName}」。` : body.summary || "试卷已发布。";
+    applyBoard(body);
     state.warning = body.warning || "";
     state.questionFile = null;
     state.answerFile = null;
@@ -558,6 +597,204 @@ function bindProctor(): void {
     if (!window.confirm("公布后，考生可以查看正确答案。确定公布吗？")) return;
     void loadResults(true);
   });
+  document.getElementById("load-subjects")?.addEventListener("click", () => {
+    void loadSubjects(state.subjectId);
+  });
+  document.getElementById("subject-pick")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLSelectElement)) return;
+    const subjectId = Number(input.value);
+    state.subjectId = Number.isInteger(subjectId) ? subjectId : null;
+    const subject = state.subjects.find((item) => item.id === state.subjectId);
+    state.paperId = subject?.papers[0]?.id ?? null;
+    void loadSubjects(state.subjectId);
+  });
+  document.getElementById("paper-pick")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLSelectElement)) return;
+    const paperId = Number(input.value);
+    state.paperId = Number.isInteger(paperId) ? paperId : null;
+  });
+  document.getElementById("start-saved")?.addEventListener("click", () => {
+    void startSaved();
+  });
+  document.getElementById("group-menu")?.addEventListener("toggle", (event) => {
+    const menu = event.target;
+    if (menu instanceof HTMLDetailsElement) state.groupOpen = menu.open;
+  });
+  document.getElementById("group-target")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLSelectElement) state.groupTarget = input.value;
+  });
+  document.getElementById("group-name")?.addEventListener("input", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement) state.groupName = input.value;
+  });
+  document.querySelectorAll<HTMLInputElement>(".group-paper").forEach((input) => {
+    input.addEventListener("change", () => {
+      const id = Number(input.value);
+      if (!Number.isInteger(id)) return;
+      state.groupIds = input.checked ? [...new Set([...state.groupIds, id])] : state.groupIds.filter((item) => item !== id);
+    });
+  });
+  document.getElementById("group-papers")?.addEventListener("click", () => {
+    void groupSaved();
+  });
+}
+
+function applyBoard(body: { subjects?: SubjectInfo[]; subjectId?: number | null; chart?: LearningChart | null }): void {
+  if (!Array.isArray(body.subjects)) return;
+  state.subjects = body.subjects;
+  const preferred = typeof body.subjectId === "number" ? body.subjectId : state.subjectId;
+  const subject = state.subjects.find((item) => item.id === preferred) ?? state.subjects[0];
+  state.subjectId = subject?.id ?? null;
+  if (!subject?.papers.some((item) => item.id === state.paperId)) state.paperId = subject?.papers[0]?.id ?? null;
+  state.chart = body.chart ?? null;
+}
+
+function passphraseFromForm(): string {
+  const input = document.getElementById("proctor-pass");
+  const passphrase = input instanceof HTMLInputElement ? input.value : state.passphrase;
+  state.passphrase = passphrase;
+  return passphrase;
+}
+
+let subjectGen = 0;
+
+async function loadSubjects(subjectId: number | null): Promise<void> {
+  const gen = ++subjectGen;
+  const passphrase = passphraseFromForm();
+  if (!passphrase) {
+    state.subjectError = "请填写监考口令。";
+    render();
+    return;
+  }
+  state.busy = true;
+  state.subjectError = "";
+  render();
+  try {
+    const response = await fetch("/api/proctor/subjects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase, subjectId }),
+    });
+    const body = (await response.json()) as { error?: string; subjects?: SubjectInfo[]; subjectId?: number | null; chart?: LearningChart | null };
+    if (gen !== subjectGen) return;
+    if (!response.ok || !Array.isArray(body.subjects)) {
+      state.subjectError = body.error || "无法读取科目。";
+      state.busy = false;
+      render();
+      return;
+    }
+    applyBoard(body);
+    state.subjectNote = "";
+    state.subjectError = "";
+  } catch {
+    if (gen !== subjectGen) return;
+    state.subjectError = "无法读取科目。";
+  }
+  if (gen !== subjectGen) return;
+  state.busy = false;
+  render();
+}
+
+async function startSaved(): Promise<void> {
+  const passphrase = passphraseFromForm();
+  const paperId = state.paperId;
+  if (!passphrase) {
+    state.subjectError = "请填写监考口令。";
+    render();
+    return;
+  }
+  if (paperId == null) {
+    state.subjectError = "请选择一份试卷。";
+    render();
+    return;
+  }
+  state.busy = true;
+  state.subjectError = "";
+  render();
+  try {
+    const response = await fetch("/api/proctor/subjects/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase, paperId }),
+    });
+    const body = (await response.json()) as {
+      error?: string;
+      summary?: string;
+      subjects?: SubjectInfo[];
+      subjectId?: number | null;
+      chart?: LearningChart | null;
+    };
+    if (!response.ok) {
+      state.subjectError = body.error || "无法开始考试。";
+      state.busy = false;
+      render();
+      return;
+    }
+    await loadExam();
+    applyBoard(body);
+    state.info = body.summary || "这场考试已开始。";
+    state.results = null;
+    state.resultsNote = "";
+    state.subjectNote = "已用保存的试卷开始新的一场。";
+    state.subjectError = "";
+  } catch {
+    state.subjectError = "无法开始考试。";
+  }
+  state.busy = false;
+  render();
+}
+
+async function groupSaved(): Promise<void> {
+  const passphrase = passphraseFromForm();
+  const paperIds = [...document.querySelectorAll<HTMLInputElement>(".group-paper:checked")].map((input) => Number(input.value));
+  const target = document.getElementById("group-target");
+  const nameInput = document.getElementById("group-name");
+  const targetValue = target instanceof HTMLSelectElement ? target.value : state.groupTarget;
+  const name = nameInput instanceof HTMLInputElement ? nameInput.value : state.groupName;
+  state.groupTarget = targetValue;
+  state.groupName = name;
+  state.groupIds = paperIds;
+  state.groupOpen = true;
+  if (!passphrase) {
+    state.subjectError = "请填写监考口令。";
+    render();
+    return;
+  }
+  state.busy = true;
+  state.subjectError = "";
+  render();
+  try {
+    const response = await fetch("/api/proctor/subjects/group", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        passphrase,
+        paperIds,
+        subjectId: targetValue === "" ? null : Number(targetValue),
+        name,
+      }),
+    });
+    const body = (await response.json()) as { error?: string; subjects?: SubjectInfo[]; subjectId?: number | null; chart?: LearningChart | null };
+    if (!response.ok || !Array.isArray(body.subjects)) {
+      state.subjectError = body.error || "无法合并科目。";
+      state.busy = false;
+      render();
+      return;
+    }
+    applyBoard(body);
+    state.groupIds = [];
+    state.groupName = "";
+    state.groupOpen = true;
+    state.subjectNote = "这些试卷已经归到同一个科目。";
+    state.subjectError = "";
+  } catch {
+    state.subjectError = "无法合并科目。";
+  }
+  state.busy = false;
+  render();
 }
 
 async function loadResults(release: boolean): Promise<void> {

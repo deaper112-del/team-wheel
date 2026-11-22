@@ -78,10 +78,24 @@ describe("renderExam", () => {
       busy: false,
       results: null,
       resultsNote: "",
+      subjects: [],
+      subjectId: null,
+      paperId: null,
+      chart: null,
+      groupIds: [],
+      groupTarget: "",
+      groupName: "",
+      groupOpen: false,
+      subjectNote: "",
+      subjectError: "",
     });
     expect(proctor).toContain("题目文件");
     expect(proctor).toContain("查看成绩");
     expect(proctor).toContain("公布答案");
+    expect(proctor).toContain("已保存的科目");
+    expect(proctor).toContain("合并科目");
+    expect(proctor).toContain("学习力曲线");
+    expect(proctor).toContain("subject-pick");
     expect(proctor).toContain("答案文件");
     expect(proctor).toContain("监考口令");
     expect(proctor).toContain("PDF");
@@ -128,5 +142,54 @@ describe("renderResult", () => {
     expect(html).toContain("关键词1");
     expect(html).toContain("再考一次");
     expect(html).toContain("返回首页");
+  });
+});
+
+describe("learning chart", () => {
+  it("draws one curve for the papers in a subject", () => {
+    const html = renderProctor({
+      passphrase: "",
+      questionLabel: "",
+      answerLabel: "",
+      summary: "",
+      info: "",
+      warning: "",
+      error: "",
+      busy: false,
+      results: null,
+      resultsNote: "",
+      subjects: [
+        {
+          id: 1,
+          name: "综合测验",
+          papers: [
+            { id: 7, title: "综合测验", createdAt: "2026-11-20T02:00:00.000Z", questionCount: 2 },
+            { id: 8, title: "综合测验", createdAt: "2026-11-20T03:00:00.000Z", questionCount: 2 },
+          ],
+        },
+      ],
+      subjectId: 1,
+      paperId: 8,
+      chart: {
+        name: "综合测验",
+        points: [
+          { round: 1, at: "2026-11-20T02:00:00.000Z", paperTitle: "综合测验", rate: 0.5, correct: 1, total: 2 },
+          { round: 2, at: "2026-11-20T03:00:00.000Z", paperTitle: "综合测验", rate: 1, correct: 2, total: 2 },
+        ],
+      },
+      groupIds: [7],
+      groupTarget: "",
+      groupName: "",
+      groupOpen: true,
+      subjectNote: "",
+      subjectError: "",
+    });
+    expect(html).toContain("<polyline");
+    expect(html).toContain("50%");
+    expect(html).toContain("100%");
+    expect(html).toContain("第1场");
+    expect(html).toContain("第2场");
+    expect(html).toContain("综合测验（2 份）");
+    expect(html).not.toContain("科目暗号");
   });
 });

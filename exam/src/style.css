@@ -200,7 +200,7 @@ h2 {
   font-weight: 700;
 }
 
-input[type="text"], textarea, .name-field input {
+input[type="text"], textarea, .name-field input, .name-field select {
   width: 100%;
   border: 1px solid #d9d0c2;
   border-radius: 12px;
@@ -208,6 +208,32 @@ input[type="text"], textarea, .name-field input {
   padding: 12px;
   font-weight: 400;
 }
+
+.chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-top: 8px;
+}
+
+.chart-title { margin-top: 18px; }
+
+.paper-checks {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 400;
+}
+
+.check input { margin-top: 4px; }
 
 textarea { min-height: 120px; resize: vertical; }
 
